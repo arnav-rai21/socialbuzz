@@ -1,4 +1,4 @@
-const ADMIN_EMAIL      = 'sachitanand.rai@timesinternet.in';
+const ADMIN_EMAIL      = 'admin@socialbuzz.app';
 const EVENTS_LIST_KEY  = 'EVENTS_LIST';
 const REPORT_SHEET_ID  = '1mdoDi-rL-lTmywgpsUGsYD9jQl8cogeia4WTNhiqtD4';
 const REPORT_SHEET_TAB = 'EventDashboard';
@@ -67,7 +67,7 @@ function doGet(e) {
     'window.__GAS_BOOTSTRAP__=' + JSON.stringify(bootstrap) + ';'
   );
   return HtmlService.createHtmlOutput(content)
-    .setTitle('ETB2B Events Platform')
+    .setTitle('SocialBuzz Events Platform')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -424,7 +424,7 @@ function checkAdminAccess(email) {
 }
 
 function requestAdminAccess(email, name) {
-  if (!email || !String(email).endsWith('@timesinternet.in')) throw new Error('Only @timesinternet.in accounts can request access.');
+  if (!email) throw new Error('Email is required to request access.');
   var props = PropertiesService.getScriptProperties();
   var raw = props.getProperty('ACCESS_REQUESTS');
   var requests = [];
@@ -537,7 +537,7 @@ function uploadToCloudinary_(base64Data, existingPublicId) {
     );
   }
 
-  var folder    = 'etb2b-events';
+  var folder    = 'socialbuzz';
   var timestamp = Math.floor(Date.now() / 1000);
 
   var sigParts = 'folder=' + folder + '&timestamp=' + timestamp;

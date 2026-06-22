@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 
-const APP_BASE_URL = process.env.APP_BASE_URL || 'https://etb2b-events-independent.vercel.app';
+const APP_BASE_URL = process.env.APP_BASE_URL || 'https://socialbuzz.vercel.app';
 
 async function uploadToCloudinary(base64Data) {
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
@@ -8,7 +8,7 @@ async function uploadToCloudinary(base64Data) {
   const apiSecret = process.env.CLOUDINARY_API_SECRET;
   if (!cloudName || !apiKey || !apiSecret) throw new Error('Cloudinary credentials not configured.');
 
-  const folder    = 'etb2b-events';
+  const folder    = 'socialbuzz';
   const timestamp = Math.floor(Date.now() / 1000);
   const sigParts  = `folder=${folder}&timestamp=${timestamp}`;
   const signature = crypto.createHash('sha256').update(sigParts + apiSecret).digest('hex');

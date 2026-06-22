@@ -26,7 +26,7 @@ async function uploadToCloudinary(base64Data, existingPublicId) {
     throw new Error('Cloudinary credentials not configured. Add CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET to Vercel env vars.');
   }
 
-  const folder    = 'etb2b-events';
+  const folder    = 'socialbuzz';
   const timestamp = Math.floor(Date.now() / 1000);
   const sigParams = { folder, timestamp: String(timestamp) };
   if (existingPublicId) { sigParams.overwrite = 'true'; sigParams.public_id = existingPublicId; }

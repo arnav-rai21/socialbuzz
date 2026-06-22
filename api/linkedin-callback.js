@@ -1,6 +1,6 @@
 import { sql, ensureTables } from './_db.js';
 
-const APP_BASE_URL = process.env.APP_BASE_URL || 'https://etb2b-events.vercel.app';
+const APP_BASE_URL = process.env.APP_BASE_URL || 'https://socialbuzz.vercel.app';
 
 function page(heading, body, isError, state) {
   const color = isError ? '#dc2626' : '#0a66c2';

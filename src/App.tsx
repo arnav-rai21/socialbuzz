@@ -46,7 +46,7 @@ export default function App() {
   // Restore admin session from sessionStorage so reloads don't bounce to login
   const _savedAuth = (() => {
     try {
-      const raw = sessionStorage.getItem('etb2b_admin_auth');
+      const raw = sessionStorage.getItem('socialbuzz_admin_auth');
       return raw ? JSON.parse(raw) as { email: string; name: string } : null;
     } catch { return null; }
   })();
@@ -118,7 +118,7 @@ export default function App() {
   }
 
   function handleAuthenticated(email: string, name: string) {
-    try { sessionStorage.setItem('etb2b_admin_auth', JSON.stringify({ email, name })); } catch {}
+    try { sessionStorage.setItem('socialbuzz_admin_auth', JSON.stringify({ email, name })); } catch {}
     setAdminEmail(email);
     setAdminName(name);
     setIsAdminAuthenticated(true);
@@ -128,7 +128,7 @@ export default function App() {
   }
 
   function handleLogout() {
-    try { sessionStorage.removeItem('etb2b_admin_auth'); } catch {}
+    try { sessionStorage.removeItem('socialbuzz_admin_auth'); } catch {}
     setIsAdminAuthenticated(false);
     setAdminEmail('');
     setAdminName('');
@@ -306,11 +306,7 @@ export default function App() {
       <header className="flex-shrink-0 border-b border-slate-100 bg-white" style={{ paddingTop: 'var(--safe-top)' }}>
         <div className="flex min-h-[56px] items-center justify-between px-4 sm:px-5">
           <div className="flex items-center gap-2.5">
-            <img
-              src="https://st.etb2bimg.com/Themes/Release/theme4/images/logos/b2b-logo-header.svg"
-              alt="ETB2B Social Buzz"
-              className="h-8 w-auto"
-            />
+            <span className="text-[17px] font-black tracking-tight" style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed 50%, #ec4899)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>Social Buzz</span>
           </div>
           <div className="flex items-center gap-1.5">
             {currentView === 'generate' && (

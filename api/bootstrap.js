@@ -1,7 +1,7 @@
 import { sql, ensureTables } from './_db.js';
 
-const ADMIN_EMAIL  = process.env.ADMIN_EMAIL  || 'sachitanand.rai@timesinternet.in';
-const APP_BASE_URL = process.env.APP_BASE_URL || 'https://etb2b-events-independent.vercel.app';
+const ADMIN_EMAIL  = process.env.ADMIN_EMAIL  || 'admin@socialbuzz.app';
+const APP_BASE_URL = process.env.APP_BASE_URL || 'https://socialbuzz.vercel.app';
 const DEFAULT_SLOT = { x: 880, y: 640, width: 520, height: 520, radius: 32 };
 const EMPTY_TEMPLATE = {
   hasTemplate: false, templateName: '', templateDataUrl: '',

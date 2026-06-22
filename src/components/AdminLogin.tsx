@@ -44,7 +44,7 @@ function buildOAuthUrl(state: string): string {
     redirect_uri:  GOOGLE_REDIRECT_URI_G,
     response_type: 'code',
     scope:         'openid email profile',
-    hd:            'timesinternet.in',
+
     access_type:   'online',
     state,
     prompt:        'select_account',
@@ -91,7 +91,7 @@ export default function AdminLogin({ onAuthenticated, onClose }: AdminLoginProps
         handleGoogleSuccess(email, name);
       } else if (status === 'domain_error') {
         setPhase('error');
-        setErrorMsg('Access is restricted to @timesinternet.in accounts.');
+        setErrorMsg('Access was denied for this account.');
       } else {
         setPhase('error');
         setErrorMsg(evt.data.message || 'Google sign-in failed.');
@@ -284,7 +284,7 @@ export default function AdminLogin({ onAuthenticated, onClose }: AdminLoginProps
             <>
               <h2 className="text-xl font-black text-slate-900">Admin Sign In</h2>
               <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
-                Use your <span className="font-semibold text-violet-600">@timesinternet.in</span> Google account to access the admin dashboard.
+                Use your Google account to access the admin dashboard.
               </p>
             </>
           )}
@@ -344,7 +344,7 @@ export default function AdminLogin({ onAuthenticated, onClose }: AdminLoginProps
         {/* Footer note */}
         {(phase === 'idle' || phase === 'error') && (
           <p className="text-xs text-slate-400 text-center">
-            Only <span className="font-semibold">@timesinternet.in</span> accounts are allowed.
+            Sign in with any Google account.
           </p>
         )}
 

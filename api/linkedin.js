@@ -1,7 +1,7 @@
 import { sql, ensureTables } from './_db.js';
 import crypto from 'crypto';
 
-const APP_BASE_URL = process.env.APP_BASE_URL || 'https://etb2b-events.vercel.app';
+const APP_BASE_URL = process.env.APP_BASE_URL || 'https://socialbuzz.vercel.app';
 
 function getRedirectUri() {
   return process.env.LINKEDIN_REDIRECT_URI || `${APP_BASE_URL}/api/linkedin-callback`;

@@ -1,12 +1,11 @@
 import { sql, ensureTables } from './_db.js';
 
-const GOOGLE_CLIENT_ID     = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const GOOGLE_REDIRECT_URI  = process.env.GOOGLE_REDIRECT_URI || 'https://etb2b-events.vercel.app/api/google-callback';
-const ALLOWED_DOMAIN       = 'timesinternet.in';
+const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'https://socialbuzz.vercel.app/api/google-callback';
 
 function popupPage(status, data) {
-  const icon    = status === 'success' ? '✅' : '❌';
+  const icon = status === 'success' ? '✅' : '❌';
   const message = data.message || (status === 'success' ? 'Sign-in successful. Closing…' : 'Sign-in failed.');
   return `<!DOCTYPE html>
 <html>
@@ -57,14 +56,14 @@ export default async function handler(req, res) {
 
   try {
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-      method:  'POST',
+      method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body:    new URLSearchParams({
+      body: new URLSearchParams({
         code,
-        client_id:     GOOGLE_CLIENT_ID,
+        client_id: GOOGLE_CLIENT_ID,
         client_secret: GOOGLE_CLIENT_SECRET,
-        redirect_uri:  GOOGLE_REDIRECT_URI,
-        grant_type:    'authorization_code',
+        redirect_uri: GOOGLE_REDIRECT_URI,
+        grant_type: 'authorization_code',
       }),
     });
     const tokens = await tokenRes.json();
@@ -78,18 +77,7 @@ export default async function handler(req, res) {
     const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
-    const user   = await userRes.json();
-    const email  = (user.email || '').toLowerCase();
-    const domain = email.split('@')[1] || '';
-
-    if (domain !== ALLOWED_DOMAIN) {
-      return res.status(200).send(popupPage('error', {
-        status: 'domain_error',
-        message: `Access is restricted to @${ALLOWED_DOMAIN} accounts. You signed in as ${user.email}.`,
-        state,
-      }));
-    }
-
+    const user = await userRes.json();
     await ensureTables();
     await sql`
       INSERT INTO oauth_sessions (state, type, data, expires_at)

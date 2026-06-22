@@ -1,7 +1,6 @@
 import { sql, ensureTables } from './_db.js';
 
-const ADMIN_EMAIL    = process.env.ADMIN_EMAIL || 'sachitanand.rai@timesinternet.in';
-const ALLOWED_DOMAIN = 'timesinternet.in';
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@socialbuzz.app';
 
 async function isApprovedAdmin(email) {
   if (!email) return false;
@@ -11,10 +10,10 @@ async function isApprovedAdmin(email) {
 }
 
 async function getPendingRequests() {
-  const { rows: reqs }     = await sql`SELECT email, name, requested_at, status FROM admin_requests ORDER BY requested_at DESC`;
+  const { rows: reqs } = await sql`SELECT email, name, requested_at, status FROM admin_requests ORDER BY requested_at DESC`;
   const { rows: approved } = await sql`SELECT email FROM admins_approved`;
   return {
-    requests:       reqs.map(r => ({ email: r.email, name: r.name, requestedAt: r.requested_at, status: r.status })),
+    requests: reqs.map(r => ({ email: r.email, name: r.name, requestedAt: r.requested_at, status: r.status })),
     approvedAdmins: approved.map(r => r.email),
   };
 }
@@ -44,9 +43,7 @@ export default async function handler(req, res) {
       }
 
       if (action === 'requestAdminAccess') {
-        if (!email || !String(email).endsWith(`@${ALLOWED_DOMAIN}`)) {
-          throw new Error(`Only @${ALLOWED_DOMAIN} accounts can request access.`);
-        }
+        if (!email) throw new Error('Email is required to request access.');
         const { rows } = await sql`SELECT id FROM admin_requests WHERE LOWER(email) = LOWER(${email}) AND status = 'pending'`;
         if (rows.length > 0) return res.status(200).json({ success: true, data: { success: true, alreadyPending: true } });
         await sql`DELETE FROM admin_requests WHERE LOWER(email) = LOWER(${email})`;

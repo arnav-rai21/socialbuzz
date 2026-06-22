@@ -9,10 +9,10 @@ import type {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-export const IS_GAS: boolean = false; // Always Vercel — GAS removed
+export const IS_GAS: boolean = false;
 
 const _env = (import.meta as any).env ?? {};
-export const ADMIN_EMAIL:          string = 'sachitanand.rai@timesinternet.in';
+export const ADMIN_EMAIL:          string = '';
 export const GAS_USER_EMAIL:       string = '';
 export const IS_GAS_ADMIN:         boolean = false;
 export const LINKEDIN_REDIRECT_URI: string = '';
@@ -21,7 +21,7 @@ export const GOOGLE_CLIENT_ID: string =
   (_env.VITE_GOOGLE_CLIENT_ID as string) || '';
 export const GOOGLE_REDIRECT_URI_G: string =
   (_env.VITE_GOOGLE_REDIRECT_URI as string) ||
-  'https://etb2b-events.vercel.app/api/google-callback';
+  'https://socialbuzz.vercel.app/api/google-callback';
 
 export const INITIAL_EVENT_SLUG: string =
   (new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('event')) ||

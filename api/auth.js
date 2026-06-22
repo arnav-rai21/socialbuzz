@@ -1,6 +1,6 @@
 import { sql, ensureTables } from './_db.js';
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'sachitanand.rai@timesinternet.in';
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@socialbuzz.app';
 
 async function isApprovedAdmin(email) {
   if (!email) return false;

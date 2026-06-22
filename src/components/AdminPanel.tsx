@@ -6,37 +6,37 @@ import type { FieldSettings, FontSettings, ImageSlot, SharingSettings, TemplateC
 import { DEFAULT_FIELD_SETTINGS, DEFAULT_FONT_SETTINGS, DEFAULT_SHARING_SETTINGS } from '../types';
 
 interface AdminPanelProps {
-  open:                boolean;
-  templateConfig:      TemplateConfig;
-  isMappingMode:       boolean;
-  isTextMappingMode:   boolean;
-  fontSettings:        FontSettings;
-  sharingSettings:     SharingSettings;
-  fieldSettings:       FieldSettings;
-  onTemplateLoad:      (dataUrl: string, fileName: string) => void;
-  onSlotChange:        (slot: ImageSlot) => void;
-  onTextSlotChange:    (slot: TextSlot | undefined) => void;
-  isSavingTemplate:    boolean;
+  open: boolean;
+  templateConfig: TemplateConfig;
+  isMappingMode: boolean;
+  isTextMappingMode: boolean;
+  fontSettings: FontSettings;
+  sharingSettings: SharingSettings;
+  fieldSettings: FieldSettings;
+  onTemplateLoad: (dataUrl: string, fileName: string) => void;
+  onSlotChange: (slot: ImageSlot) => void;
+  onTextSlotChange: (slot: TextSlot | undefined) => void;
+  isSavingTemplate: boolean;
   hideTemplateUpload?: boolean;
-  onSaveMapping:       () => void;
-  onToggleMapping:     () => void;
+  onSaveMapping: () => void;
+  onToggleMapping: () => void;
   onToggleTextMapping: () => void;
-  onFontChange:        (s: FontSettings) => void;
-  onSharingChange:     (s: SharingSettings) => void;
+  onFontChange: (s: FontSettings) => void;
+  onSharingChange: (s: SharingSettings) => void;
   onFieldSettingsChange: (s: FieldSettings) => void;
-  eventSlug?:          string;
-  onViewDashboard?:    () => void;
+  eventSlug?: string;
+  onViewDashboard?: () => void;
 }
 
 const FONT_FAMILIES = [
-  { label: 'Inter',             value: 'Inter, Arial, sans-serif'                        },
-  { label: 'Poppins',           value: 'Poppins, Arial, sans-serif'                      },
-  { label: 'Plus Jakarta Sans', value: '"Plus Jakarta Sans", Arial, sans-serif'           },
-  { label: 'Barlow Condensed',  value: '"Barlow Condensed", Arial, sans-serif'            },
-  { label: 'Montserrat',        value: 'Montserrat, Arial, sans-serif'                   },
-  { label: 'Arial',             value: 'Arial, sans-serif'                               },
-  { label: 'Georgia',           value: 'Georgia, serif'                                  },
-  { label: 'Times New Roman',   value: '"Times New Roman", Times, serif'                 },
+  { label: 'Inter', value: 'Inter, Arial, sans-serif' },
+  { label: 'Poppins', value: 'Poppins, Arial, sans-serif' },
+  { label: 'Plus Jakarta Sans', value: '"Plus Jakarta Sans", Arial, sans-serif' },
+  { label: 'Barlow Condensed', value: '"Barlow Condensed", Arial, sans-serif' },
+  { label: 'Montserrat', value: 'Montserrat, Arial, sans-serif' },
+  { label: 'Arial', value: 'Arial, sans-serif' },
+  { label: 'Georgia', value: 'Georgia, serif' },
+  { label: 'Times New Roman', value: '"Times New Roman", Times, serif' },
 ];
 
 export default function AdminPanel({
@@ -48,23 +48,23 @@ export default function AdminPanel({
 }: AdminPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
-  const slot     = templateConfig.imageSlot;
+  const slot = templateConfig.imageSlot;
   const textSlot = templateConfig.textSlot;
-  const fs   = fontSettings    || DEFAULT_FONT_SETTINGS;
-  const ss   = sharingSettings || DEFAULT_SHARING_SETTINGS;
-  const flds = fieldSettings   || DEFAULT_FIELD_SETTINGS;
+  const fs = fontSettings || DEFAULT_FONT_SETTINGS;
+  const ss = sharingSettings || DEFAULT_SHARING_SETTINGS;
+  const flds = fieldSettings || DEFAULT_FIELD_SETTINGS;
 
   const FIELD_DEFS = [
-    { key: 'name'    as const, label: 'Full Name',        Icon: User      },
-    { key: 'title'   as const, label: 'Role/Designation', Icon: Briefcase },
-    { key: 'company' as const, label: 'Company',          Icon: Building2 },
-    { key: 'email'   as const, label: 'Email Address',    Icon: Mail      },
+    { key: 'name' as const, label: 'Full Name', Icon: User },
+    { key: 'title' as const, label: 'Role/Designation', Icon: Briefcase },
+    { key: 'company' as const, label: 'Company', Icon: Building2 },
+    { key: 'email' as const, label: 'Email Address', Icon: Mail },
   ];
 
   async function handleFile(file: File) {
     if (!file.type.startsWith('image/')) { toast.error('Please select a valid image file.'); return; }
     try {
-      const reader  = new FileReader();
+      const reader = new FileReader();
       const dataUrl = await new Promise<string>((res, rej) => {
         reader.onload = () => res(reader.result as string);
         reader.onerror = rej;
@@ -163,7 +163,7 @@ export default function AdminPanel({
                   'border-2 border-dashed rounded-2xl p-5 flex flex-col items-center gap-3 text-center cursor-pointer transition-all duration-200',
                   isDragOver ? 'border-blue-500 bg-blue-50'
                     : templateConfig.hasTemplate ? 'border-green-400 bg-green-50 hover:bg-green-100/60'
-                    : 'border-slate-300 bg-white hover:border-blue-400 hover:bg-blue-50/40',
+                      : 'border-slate-300 bg-white hover:border-blue-400 hover:bg-blue-50/40',
                 ].join(' ')}
               >
                 <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center">
@@ -187,10 +187,10 @@ export default function AdminPanel({
               <SectionLabel>Photo Slot Coordinates</SectionLabel>
               <div className="grid grid-cols-2 gap-3">
                 {([
-                  { id: 'x',      label: 'Photo X',      min: 0 },
-                  { id: 'y',      label: 'Photo Y',      min: 0 },
-                  { id: 'width',  label: 'Width',        min: 1 },
-                  { id: 'height', label: 'Height',       min: 1 },
+                  { id: 'x', label: 'Photo X', min: 0 },
+                  { id: 'y', label: 'Photo Y', min: 0 },
+                  { id: 'width', label: 'Width', min: 1 },
+                  { id: 'height', label: 'Height', min: 1 },
                   { id: 'radius', label: 'Corner Radius', min: 0 },
                 ] as { id: keyof ImageSlot; label: string; min: number }[]).map(({ id, label, min }) => (
                   <div key={id} className={id === 'radius' ? 'col-span-2' : ''}>
@@ -209,10 +209,10 @@ export default function AdminPanel({
               <p className="text-xs text-slate-400 mb-2">Leave blank to auto-position text below the photo.</p>
               <div className="grid grid-cols-2 gap-3">
                 {([
-                  { id: 'x',      label: 'Text X' },
-                  { id: 'y',      label: 'Text Y' },
-                  { id: 'width',  label: 'Width'   },
-                  { id: 'height', label: 'Height'  },
+                  { id: 'x', label: 'Text X' },
+                  { id: 'y', label: 'Text Y' },
+                  { id: 'width', label: 'Width' },
+                  { id: 'height', label: 'Height' },
                 ] as { id: keyof TextSlot; label: string }[]).map(({ id, label }) => (
                   <div key={id}>
                     <label className="block text-xs font-semibold text-slate-600 mb-1">{label}</label>
@@ -336,7 +336,7 @@ export default function AdminPanel({
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Default Hashtags</label>
                 <input type="text" value={ss.defaultHashtags}
                   onChange={(e) => onSharingChange({ ...ss, defaultHashtags: e.target.value })}
-                  placeholder="#socialmedia #networking #etb2b"
+                  placeholder="#socialmedia #networking #socialbuzz"
                   className={inputCls} />
                 <p className="text-xs text-slate-400 mt-1">Automatically appended to every post.</p>
               </div>
