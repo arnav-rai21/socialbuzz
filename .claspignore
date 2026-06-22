@@ -1,0 +1,13 @@
+node_modules/**
+dist/**
+src/**
+scripts/**
+api/**
+app.html
+vercel.json
+*.ts
+*.tsx
+package.json
+package-lock.json
+tsconfig.json
+vite.config.ts

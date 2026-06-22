@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx clasp *)",
+      "Bash(npm run *)",
+      "Bash(clasp push *)",
+      "Bash(clasp deploy *)",
+      "Bash(clasp deployments *)",
+      "Bash(clasp open *)",
+      "Bash(vercel --version)",
+      "Bash(vercel whoami *)",
+      "Bash(NODE_TLS_REJECT_UNAUTHORIZED=0 vercel whoami)",
+      "Bash(NODE_TLS_REJECT_UNAUTHORIZED=0 vercel --prod --yes --env GAS_EXEC_URL=https://script.google.com/macros/s/AKfycbwacoIz5ysCUQ8PGYMAbuThA8K49Nd1CGU3Qqesn_FXJbu9uRZgE8I3ZBnWHTxlpqce/exec)",
+      "Bash(NODE_TLS_REJECT_UNAUTHORIZED=0 vercel --prod --yes)",
+      "Bash(NODE_TLS_REJECT_UNAUTHORIZED=0 vercel env add GAS_EXEC_URL production)",
+      "Bash(NODE_TLS_REJECT_UNAUTHORIZED=0 vercel env rm GAS_EXEC_URL production --yes)",
+      "Bash(vercel --prod)",
+      "Bash(security find-certificate *)",
+      "Bash(NODE_EXTRA_CA_CERTS=/tmp/sys-certs.pem vercel --prod)",
+      "Bash(NODE_EXTRA_CA_CERTS=/tmp/sys-certs.pem vercel ls)",
+      "Bash(NODE_EXTRA_CA_CERTS=/tmp/sys-certs.pem vercel --prod --prebuilt)",
+      "Bash(NODE_EXTRA_CA_CERTS=/tmp/sys-certs.pem vercel build --prod)",
+      "Bash(NODE_EXTRA_CA_CERTS=/tmp/sys-certs.pem vercel pull --yes --environment production)",
+      "Bash(NODE_EXTRA_CA_CERTS=/tmp/sys-certs.pem vercel deploy --prod --prebuilt)"
+    ]
+  }
+}
