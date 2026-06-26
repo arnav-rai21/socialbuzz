@@ -3,6 +3,8 @@ import AdminLogin from './AdminLogin';
 
 interface Props {
   onAuthenticated: (email: string, name: string) => void;
+  /** Optional — return to the marketing homepage. */
+  onBack?: () => void;
 }
 
 function GoogleIcon() {
@@ -16,7 +18,7 @@ function GoogleIcon() {
   );
 }
 
-export default function LandingPage({ onAuthenticated }: Props) {
+export default function LandingPage({ onAuthenticated, onBack }: Props) {
   const [showLogin, setShowLogin] = useState(false);
 
   return (
@@ -28,6 +30,15 @@ export default function LandingPage({ onAuthenticated }: Props) {
           className="lg:w-[55%] relative flex flex-col justify-center px-8 py-16 lg:px-16 overflow-hidden"
           style={{ background: 'linear-gradient(140deg, #1e0a4a 0%, #3b0d8a 25%, #6d28d9 55%, #a21caf 80%, #be185d 100%)' }}
         >
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="absolute left-6 top-6 z-20 inline-flex items-center gap-1.5 rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-[12px] font-semibold text-white/90 backdrop-blur-sm transition-all duration-200 hover:bg-white/20"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
+              Back
+            </button>
+          )}
           {/* Glow orbs */}
           <div className="pointer-events-none absolute -top-20 -right-16 w-80 h-80 rounded-full"
             style={{ background: 'radial-gradient(circle, rgba(236,72,153,0.38) 0%, transparent 70%)', filter: 'blur(60px)' }} />

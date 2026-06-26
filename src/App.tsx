@@ -23,6 +23,7 @@ import { toast } from 'sonner';
 import AdminLogin from './components/AdminLogin';
 import AdminPanel from './components/AdminPanel';
 import LandingPage from './components/LandingPage';
+import MarketingPage from './components/MarketingPage';
 import CanvasPreview from './components/CanvasPreview';
 import CropModal from './components/CropModal';
 import EventDashboard, { StatsView } from './components/EventDashboard';
@@ -102,6 +103,9 @@ export default function App() {
   const [showLanding, setShowLanding] = useState(
     !_savedAuth && INITIAL_EVENT_SLUG === 'default'
   );
+  // Within the landing flow, show the marketing homepage first; the login step
+  // (LandingPage) is reached via its CTA. Reset to true on logout.
+  const [showMarketing, setShowMarketing] = useState(true);
 
   // ── Multi-event state ─────────────────────────────────────────────────────
   const [eventSlug, setEventSlug] = useState(INITIAL_EVENT_SLUG);
@@ -205,6 +209,7 @@ export default function App() {
     setIsAdminOpen(false);
     setAppMode('app');
     setShowLanding(true);
+    setShowMarketing(true);
   }
 
   // ── Template ──────────────────────────────────────────────────────────────
@@ -479,9 +484,14 @@ export default function App() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  // Landing page — shown on root URL when not authenticated
+  // Marketing homepage — shown first on root URL when not authenticated
+  if (showLanding && showMarketing) {
+    return <MarketingPage onGetStarted={() => setShowMarketing(false)} />;
+  }
+
+  // Login step — Google sign-in, reached from the marketing page's CTA
   if (showLanding) {
-    return <LandingPage onAuthenticated={handleAuthenticated} />;
+    return <LandingPage onAuthenticated={handleAuthenticated} onBack={() => setShowMarketing(true)} />;
   }
 
   // Admin dashboard mode — full-screen dashboard for event management
