@@ -1,4 +1,5 @@
 import { sql, ensureTables } from './_db.js';
+import { handleCors } from './_cors.js';
 
 const DEFAULT_SLOT = { x: 880, y: 640, width: 520, height: 520, radius: 32 };
 
@@ -28,10 +29,12 @@ async function deleteEvent(slug) {
   if (!slug || slug === 'default') throw new Error('Cannot delete the default event');
   await sql`DELETE FROM events_list WHERE slug = ${slug}`;
   await sql`DELETE FROM events_config WHERE slug = ${slug}`;
+  await sql`DELETE FROM event_templates WHERE slug = ${slug}`;
   return { success: true };
 }
 
 export default async function handler(req, res) {
+  if (handleCors(req, res)) return;
   try {
     await ensureTables();
 

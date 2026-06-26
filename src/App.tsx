@@ -1,14 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
+  BarChart2,
+  Camera,
   ChevronLeft,
   CloudUpload,
-  FlipHorizontal,
+  Code2,
+  ExternalLink,
+  ImageIcon,
+  Link2,
+  Loader,
   PenLine,
   Settings,
   Sparkles,
+  Trash2,
   Upload,
   User,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -17,24 +25,32 @@ import AdminPanel from './components/AdminPanel';
 import LandingPage from './components/LandingPage';
 import CanvasPreview from './components/CanvasPreview';
 import CropModal from './components/CropModal';
-import EventDashboard from './components/EventDashboard';
+import EventDashboard, { StatsView } from './components/EventDashboard';
 import ImageUpload from './components/ImageUpload';
 import ShareButtons from './components/ShareButtons';
+import TemplateGallery from './components/TemplateGallery';
 import UserForm from './components/UserForm';
 
-import { IS_GAS, IS_GAS_ADMIN, INITIAL_EVENT_SLUG, INITIAL_MODE, callSaveTemplate, callUploadImage, loadBootstrap, loadBootstrapAsync } from './lib/server';
-import type { EventMeta, FieldSettings, FontSettings, GeneratedAsset, ImageSlot, SharingSettings, TemplateConfig, TextSlot, UserProfile } from './types';
+import { IS_GAS, IS_GAS_ADMIN, INITIAL_EVENT_SLUG, INITIAL_MODE, DEFAULT_SLOT, callDeleteEvent, callDeleteTemplate, callGetEventStats, callSaveTemplate, callUploadImage, loadBootstrap, loadBootstrapAsync } from './lib/server';
+import type { EventMeta, EventStats, FieldSettings, FontSettings, GeneratedAsset, ImageSlot, SharingSettings, TemplateConfig, TextSlot, UserProfile } from './types';
 import { DEFAULT_FIELD_SETTINGS, DEFAULT_FONT_SETTINGS, DEFAULT_SHARING_SETTINGS } from './types';
 
 const initialTemplate = loadBootstrap();
 
 // ── App ───────────────────────────────────────────────────────────────────────
 
+// Stable client key for a template: its DB id, or 'new' for an unsaved draft.
+const keyOf = (t: TemplateConfig): string => (t.id != null ? String(t.id) : 'new');
+
 export default function App() {
-  const [templateConfig, setTemplateConfig]             = useState<TemplateConfig>(initialTemplate);
+  // ── Multi-template state ──────────────────────────────────────────────────
+  // `templates` holds every template for the current event; at most one may be an
+  // unsaved draft (id === undefined). `activeKey` selects which one is shown/edited.
+  const [templates, setTemplates]                       = useState<TemplateConfig[]>([]);
+  const [activeKey, setActiveKey]                       = useState<string>('');
   const [templateUploadDataUrl, setTemplateUploadDataUrl] = useState('');
   const [isSavingTemplate, setIsSavingTemplate]         = useState(false);
-  const [fontSettings,    setFontSettings]              = useState<FontSettings>(initialTemplate.fontSettings    || DEFAULT_FONT_SETTINGS);
+  // sharing & field settings are event-level (shared by all templates).
   const [sharingSettings, setSharingSettings]           = useState<SharingSettings>(initialTemplate.sharingSettings || DEFAULT_SHARING_SETTINGS);
   const [fieldSettings,   setFieldSettings]             = useState<FieldSettings>(initialTemplate.fieldSettings   || DEFAULT_FIELD_SETTINGS);
   const [userRawDataUrl,     setUserRawDataUrl]         = useState('');
@@ -60,8 +76,27 @@ export default function App() {
   const [isTextMappingMode, setIsTextMappingMode] = useState(false);
   const [currentView,    setCurrentView]               = useState<'form' | 'generate'>('form');
   const [adminTab,       setAdminTab]                  = useState<'settings' | 'user'>('settings');
+  // Edit-event workspace top-nav section (Template editor lives under 'template')
+  const [editorSection,  setEditorSection]             = useState<'template' | 'analytics' | 'share' | 'embed' | 'delete'>('template');
+  const [editStats,      setEditStats]                 = useState<EventStats | null>(null);
+  const [editStatsLoading, setEditStatsLoading]        = useState(false);
+  const [embedPosition,  setEmbedPosition]             = useState<'right' | 'left'>('right');
+  const [confirmDeleteEvent, setConfirmDeleteEvent]    = useState(false);
+  const [isDeletingEvent, setIsDeletingEvent]          = useState(false);
   const templateFileInputRef                           = useRef<HTMLInputElement>(null);
   const [templateIsDragOver, setTemplateIsDragOver]   = useState(false);
+
+  // ── Picker / webcam (shared between form upload and generate-view "Change photo") ──
+  const galleryInputRef        = useRef<HTMLInputElement>(null);
+  const cameraInputRef         = useRef<HTMLInputElement>(null);
+  const videoRef               = useRef<HTMLVideoElement>(null);
+  const streamRef              = useRef<MediaStream | null>(null);
+  const pendingAutoGenerateRef = useRef(false);
+  // Updated every render so it always holds a fresh closure over current state
+  const triggerUploadRef       = useRef<((dataUrl: string) => void) | null>(null);
+  const [showPicker, setShowPicker] = useState(false);
+  const [showWebcam, setShowWebcam] = useState(false);
+  const [camReady,   setCamReady]   = useState(false);
 
   // Show landing when: no saved session AND no specific event slug in URL
   const [showLanding, setShowLanding] = useState(
@@ -80,21 +115,56 @@ export default function App() {
   // Keep eventSlug in profile in sync with eventSlug state
   useEffect(() => { setProfile(prev => ({ ...prev, eventSlug })); }, [eventSlug]);
 
+  // Attach webcam stream to video element once modal opens
+  useEffect(() => {
+    if (showWebcam && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+    if (!showWebcam) setCamReady(false);
+  }, [showWebcam]);
+
+  // Release camera on unmount
+  useEffect(() => () => { streamRef.current?.getTracks().forEach(t => t.stop()); }, []);
+
   // Fetch bootstrap data from /api/bootstrap on mount
   useEffect(() => {
     loadBootstrapAsync(eventSlug).then(data => {
       if (!data) return;
-      if (data.templateConfig) {
-        setTemplateConfig(data.templateConfig);
-        if (data.templateConfig.fontSettings)    setFontSettings(data.templateConfig.fontSettings);
-        if (data.templateConfig.sharingSettings) setSharingSettings(data.templateConfig.sharingSettings);
-        if (data.templateConfig.fieldSettings)   setFieldSettings(data.templateConfig.fieldSettings);
-      }
+      // Prefer the templates[] array; fall back to the single templateConfig for old responses.
+      const list = (data.templates && data.templates.length)
+        ? data.templates
+        : (data.templateConfig?.hasTemplate ? [data.templateConfig] : []);
+      setTemplates(list);
+      const def = list.find(t => t.isDefault) || list[0];
+      if (def) setActiveKey(keyOf(def));
+
+      const sharing = data.sharingSettings ?? data.templateConfig?.sharingSettings;
+      const fields  = data.fieldSettings   ?? data.templateConfig?.fieldSettings;
+      if (sharing) setSharingSettings(sharing);
+      if (fields)  setFieldSettings(fields);
+
       if (Array.isArray(data.eventsList)) setEventsList(data.eventsList);
     });
-  }, []);
+    // Re-fetch whenever the event being edited/viewed changes (e.g. switching
+    // events from the admin dashboard), otherwise the template list stays stale.
+  }, [eventSlug]);
 
-  const hasTemplate   = Boolean(templateConfig.templateDataUrl);
+  // ── Derived active template ────────────────────────────────────────────────
+  const activeTemplate: TemplateConfig =
+    templates.find(t => keyOf(t) === activeKey) ?? templates[0] ?? initialTemplate;
+  const activeFont: FontSettings = activeTemplate.fontSettings || DEFAULT_FONT_SETTINGS;
+
+  // Patch the currently-active template inside the templates list.
+  const updateActive = useCallback((patch: Partial<TemplateConfig>) => {
+    setTemplates(prev => {
+      if (!prev.length) return prev;
+      const key = activeKey || keyOf(prev[0]);
+      return prev.map(t => (keyOf(t) === key ? { ...t, ...patch } : t));
+    });
+  }, [activeKey]);
+
+  const hasTemplate   = Boolean(activeTemplate.templateDataUrl);
   const hasUserPhoto  = Boolean(userCroppedDataUrl);
   const detailsFilled = (['name', 'title', 'company', 'email'] as const).every(key => {
     const cfg = fieldSettings[key];
@@ -139,25 +209,67 @@ export default function App() {
 
   // ── Template ──────────────────────────────────────────────────────────────
 
+  // Upload of a fresh image always creates a NEW draft template (one draft at a time).
   function handleTemplateLoad(dataUrl: string, fileName: string) {
+    const draft: TemplateConfig = {
+      hasTemplate: true, templateName: fileName, templateDataUrl: dataUrl,
+      imageSlot: { ...DEFAULT_SLOT }, fontSettings: DEFAULT_FONT_SETTINGS,
+    };
+    setTemplates(prev => [...prev.filter(t => t.id != null), draft]); // replace any prior draft
     setTemplateUploadDataUrl(dataUrl);
-    setTemplateConfig(prev => ({ ...prev, hasTemplate: true, templateName: fileName, templateDataUrl: dataUrl, textSlot: undefined }));
+    setActiveKey('new');
     setGeneratedAsset(null);
     setIsMappingMode(true);
   }
 
+  function handleSelectTemplate(key: string) {
+    setActiveKey(key);
+    setGeneratedAsset(null);
+  }
+
+  function handleDeleteTemplate(t: TemplateConfig) {
+    // Unsaved draft — just drop it locally.
+    if (t.id == null) {
+      setTemplates(prev => {
+        const next = prev.filter(x => keyOf(x) !== 'new');
+        setActiveKey(next.length ? keyOf(next[0]) : '');
+        return next;
+      });
+      setTemplateUploadDataUrl('');
+      return;
+    }
+    const dropLocally = () => setTemplates(prev => {
+      const next = prev.filter(x => x.id !== t.id);
+      if (keyOf(t) === activeKey) setActiveKey(next.length ? keyOf(next[0]) : '');
+      return next;
+    });
+    callDeleteTemplate(eventSlug, t.id,
+      () => { dropLocally(); toast.success('Template deleted.'); },
+      (err) => {
+        const msg = (err as Error)?.message ?? String(err);
+        // Stale local state: the row is already gone server-side — clean it up quietly.
+        if (/not found/i.test(msg)) { dropLocally(); toast.info('Template was already removed.'); return; }
+        toast.error(`Delete failed: ${msg}`);
+      }
+    );
+  }
+
   function handleSlotChange(slot: ImageSlot) {
-    setTemplateConfig(prev => ({ ...prev, imageSlot: slot }));
+    updateActive({ imageSlot: slot });
     setGeneratedAsset(null);
   }
 
   function handleTextSlotChange(slot: TextSlot | undefined) {
-    setTemplateConfig(prev => ({ ...prev, textSlot: slot }));
+    updateActive({ textSlot: slot });
     setGeneratedAsset(null);
   }
 
+  function handleFontChange(fs: FontSettings) {
+    updateActive({ fontSettings: fs });
+  }
+
   function handleToggleMapping() {
-    if (!templateConfig.hasTemplate) { toast.error('Upload a template first.'); return; }
+    if (!activeTemplate.hasTemplate) { toast.error('Upload a template first.'); return; }
     const next = !isMappingMode;
     setIsMappingMode(next);
     if (next) setIsTextMappingMode(false);
@@ -165,7 +277,7 @@ export default function App() {
   }
 
   function handleToggleTextMapping() {
-    if (!templateConfig.hasTemplate) { toast.error('Upload a template first.'); return; }
+    if (!activeTemplate.hasTemplate) { toast.error('Upload a template first.'); return; }
     const next = !isTextMappingMode;
     setIsTextMappingMode(next);
     if (next) setIsMappingMode(false);
@@ -173,21 +285,26 @@ export default function App() {
   }
 
   function handleSaveMapping() {
-    const dataUrl = templateUploadDataUrl || templateConfig.templateDataUrl;
+    const t = activeTemplate;
+    const dataUrl = templateUploadDataUrl || t.templateDataUrl;
     if (!dataUrl) { toast.error('Select a template image first.'); return; }
     setIsSavingTemplate(true);
-    const payloadTextSlot = templateConfig.textSlot; // capture before async
+    const prevKey = keyOf(t);
+    const payloadTextSlot = t.textSlot; // capture before async
     callSaveTemplate(
-      { fileName: templateConfig.templateName || `template_${Date.now()}.png`, templateDataUrl: dataUrl, imageSlot: templateConfig.imageSlot, textSlot: payloadTextSlot, eventSlug, fontSettings, sharingSettings, fieldSettings },
+      { templateId: t.id, fileName: t.templateName || `template_${Date.now()}.png`, templateDataUrl: dataUrl, imageSlot: t.imageSlot, textSlot: payloadTextSlot, eventSlug, fontSettings: t.fontSettings || activeFont, sharingSettings, fieldSettings },
       (config) => {
-        // Server may omit textSlot when Cloudinary re-fetch fails on load-back; preserve what was just saved.
-        setTemplateConfig({ ...config, textSlot: config.textSlot ?? payloadTextSlot });
-        if (config.fontSettings)    setFontSettings(config.fontSettings);
+        // Server may omit textSlot when the image re-fetch fails on load-back; preserve what was just saved.
+        const merged: TemplateConfig = { ...config, textSlot: config.textSlot ?? payloadTextSlot };
+        setTemplates(prev => {
+          const others = prev.filter(x => keyOf(x) !== prevKey);
+          return [...others, merged].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+        });
+        setActiveKey(keyOf(merged));
         if (config.sharingSettings) setSharingSettings(config.sharingSettings);
         if (config.fieldSettings)   setFieldSettings(config.fieldSettings);
         setTemplateUploadDataUrl('');
         setIsSavingTemplate(false);
-        setIsAdminOpen(false);
         setIsMappingMode(false);
         setIsTextMappingMode(false);
         toast.success('Template & settings saved!');
@@ -207,6 +324,39 @@ export default function App() {
     reader.readAsDataURL(file);
   }
 
+  // ── Editor sections (top-nav workspace) ────────────────────────────────────
+
+  function loadEditStats(slug: string) {
+    setEditStatsLoading(true);
+    callGetEventStats(
+      slug,
+      (stats) => { setEditStats(stats); setEditStatsLoading(false); },
+      (err)   => { setEditStatsLoading(false); toast.error(`Could not load stats: ${(err as Error)?.message ?? err}`); }
+    );
+  }
+
+  function selectEditorSection(section: typeof editorSection) {
+    setEditorSection(section);
+    if (section === 'analytics' && !editStats && !editStatsLoading) loadEditStats(eventSlug);
+  }
+
+  function handleDeleteCurrentEvent() {
+    if (eventSlug === 'default') { toast.error('The default event cannot be deleted.'); return; }
+    setIsDeletingEvent(true);
+    callDeleteEvent(
+      eventSlug,
+      () => {
+        setIsDeletingEvent(false);
+        setConfirmDeleteEvent(false);
+        setEventsList(prev => prev.filter(e => e.slug !== eventSlug));
+        toast.success('Event deleted.');
+        setIsAdminOpen(false);
+        setAppMode('admin-dashboard');
+      },
+      (err) => { setIsDeletingEvent(false); toast.error(`Delete failed: ${(err as Error)?.message ?? err}`); }
+    );
+  }
+
   // ── Photo ─────────────────────────────────────────────────────────────────
 
   function handleFileSelected(file: File) {
@@ -219,6 +369,8 @@ export default function App() {
     setUserCroppedDataUrl(croppedDataUrl);
     setCropModalOpen(false);
     setGeneratedAsset(null);
+    // If the user changed their photo while already on the generate view, auto-regenerate
+    if (currentView === 'generate') pendingAutoGenerateRef.current = true;
   }
 
   function handleRemovePhoto() {
@@ -227,34 +379,85 @@ export default function App() {
     setGeneratedAsset(null);
   }
 
-  const handleCanvasDataUrl = useCallback((dataUrl: string) => { setFinalImageDataUrl(dataUrl); }, []);
+  const handleCanvasDataUrl = useCallback((dataUrl: string) => {
+    setFinalImageDataUrl(dataUrl);
+    // Auto-regenerate when the canvas updates after a "Change photo" on the generate view
+    if (pendingAutoGenerateRef.current) {
+      pendingAutoGenerateRef.current = false;
+      triggerUploadRef.current?.(dataUrl);
+    }
+  }, []);
 
   // ── Generate ──────────────────────────────────────────────────────────────
 
-  function handleGenerate() {
-    if (!templateConfig.templateDataUrl) { toast.error('No template loaded.'); return; }
+  function handleGenerate(dataUrlOverride?: string) {
+    const dataUrl = dataUrlOverride ?? finalImageDataUrl;
+    if (!activeTemplate.templateDataUrl) { toast.error('No template loaded.'); return; }
     if (!userCroppedDataUrl) { toast.error('Upload and crop your photo first.'); return; }
-    if (!finalImageDataUrl)  { toast.error('Preview not ready — wait a moment.'); return; }
+    if (!dataUrl)  { toast.error('Preview not ready — wait a moment.'); return; }
     setIsGenerating(true);
 
-    // Compress to JPEG before upload — ~4–6× smaller than PNG, significantly faster round-trip.
-    const uploadCanvas = document.createElement('canvas');
-    const uploadCtx    = uploadCanvas.getContext('2d');
-    const img          = new Image();
-    img.onload = () => {
-      uploadCanvas.width  = img.width;
-      uploadCanvas.height = img.height;
-      uploadCtx!.drawImage(img, 0, 0);
-      const jpegBase64 = uploadCanvas.toDataURL('image/jpeg', 0.82).replace(/^data:image\/jpeg;base64,/, '');
-      callUploadImage(
-        jpegBase64,
-        profile,
-        (asset) => { setGeneratedAsset(asset); setIsGenerating(false); setCurrentView('generate'); window.scrollTo({ top: 0, behavior: 'instant' }); toast.success('Your post is ready!'); },
-        (err)   => { setIsGenerating(false); toast.error(`Generation failed: ${(err as Error)?.message ?? err}`); }
-      );
-    };
-    img.src = finalImageDataUrl;
+    // Absolute safety net: reset loading state after 25 s no matter what happens.
+    const safetyTimer = setTimeout(() => {
+      setIsGenerating(false);
+      toast.error('Generation timed out — please try again.');
+    }, 25_000);
+
+    // CanvasPreview already outputs JPEG — just strip the data URL header and upload.
+    const base64 = dataUrl.replace(/^data:image\/[^;]+;base64,/, '');
+    callUploadImage(
+      base64,
+      profile,
+      (asset) => { clearTimeout(safetyTimer); setGeneratedAsset(asset); setIsGenerating(false); setCurrentView('generate'); window.scrollTo({ top: 0, behavior: 'instant' }); toast.success('Your post is ready!'); },
+      (err)   => { clearTimeout(safetyTimer); setIsGenerating(false); toast.error(`Generation failed: ${(err as Error)?.message ?? err}`); }
+    );
   }
+
+  // ── Picker / webcam helpers ────────────────────────────────────────────────
+
+  function openPicker() { setShowPicker(true); }
+
+  async function handleOpenWebcam() {
+    setShowPicker(false);
+    if (!navigator.mediaDevices?.getUserMedia) { cameraInputRef.current?.click(); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
+      streamRef.current = stream;
+      setShowWebcam(true);
+    } catch {
+      cameraInputRef.current?.click();
+    }
+  }
+
+  function stopWebcam() {
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
+    setShowWebcam(false);
+  }
+
+  function capturePhoto() {
+    const video = videoRef.current;
+    if (!video || video.videoWidth === 0) return;
+    const canvas = document.createElement('canvas');
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    // Mirror horizontally to match the selfie preview (which is CSS-mirrored via scaleX(-1))
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0);
+    canvas.toBlob(blob => {
+      if (!blob) { toast.error('Failed to capture photo.'); return; }
+      handleFileSelected(new File([blob], 'webcam-photo.jpg', { type: 'image/jpeg' }));
+      stopWebcam();
+    }, 'image/jpeg', 0.92);
+  }
+
+  // Keep triggerUploadRef fresh so handleCanvasDataUrl can call it without stale closure
+  triggerUploadRef.current = (dataUrl: string) => handleGenerate(dataUrl);
 
   function goBackToForm() {
     setCurrentView('form');
@@ -292,6 +495,9 @@ export default function App() {
           setEventSlug(slug);
           setAppMode('app');
           setIsAdminOpen(true);
+          setEditorSection('template');
+          setEditStats(null);
+          setConfirmDeleteEvent(false);
         }}
         onClose={() => setAppMode('app')}
         onLogout={handleLogout}
@@ -328,7 +534,130 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main content — two-column on desktop */}
+      {/* Edit-event top navigation — admin editing only */}
+      {isAdminActive && currentView === 'form' && (
+        <div className="flex-shrink-0 border-b border-slate-200 bg-white overflow-x-auto">
+          <div className="flex gap-1 px-3 sm:px-5 min-w-max">
+            {([
+              { key: 'template'  as const, label: 'Template',     Icon: PenLine },
+              { key: 'analytics' as const, label: 'Analytics',    Icon: BarChart2 },
+              { key: 'share'     as const, label: 'Share & Open', Icon: Link2 },
+              { key: 'embed'     as const, label: 'Embed',        Icon: Code2 },
+              { key: 'delete'    as const, label: 'Delete',       Icon: Trash2 },
+            ]).map(({ key, label, Icon }) => {
+              const active = editorSection === key;
+              const danger = key === 'delete';
+              return (
+                <button key={key} onClick={() => selectEditorSection(key)}
+                  className={['flex items-center gap-1.5 px-3 sm:px-4 py-3 text-sm font-bold border-b-2 -mb-px whitespace-nowrap cursor-pointer transition-colors',
+                    active ? (danger ? 'border-red-500 text-red-600' : 'border-violet-600 text-violet-600')
+                           : (danger ? 'border-transparent text-red-400 hover:text-red-600' : 'border-transparent text-slate-500 hover:text-slate-700')].join(' ')}>
+                  <Icon size={15} /> {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Non-template sections render full-width in place of the editor (same page) */}
+      {isAdminActive && currentView === 'form' && editorSection !== 'template' ? (
+        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 bg-slate-50">
+          {(() => {
+            const eventName = eventsList.find(e => e.slug === eventSlug)?.name || eventSlug;
+            const eventUrl  = window.location.origin + window.location.pathname + '?event=' + encodeURIComponent(eventSlug);
+            const widgetSrc = window.location.origin + '/widget.js';
+            const embedCode = `<script\n  src="${widgetSrc}"\n  data-event="${eventSlug}"\n  data-position="${embedPosition}"\n  async>\n<\/script>`;
+            return (
+              <div className="max-w-5xl mx-auto">
+                {editorSection === 'analytics' && (
+                  editStatsLoading
+                    ? <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center gap-3 py-20"><Loader size={26} className="animate-spin text-violet-500" /><p className="text-sm text-slate-400 font-medium">Loading analytics…</p></div>
+                    : editStats
+                      ? <StatsView slug={eventSlug} stats={editStats} eventName={eventName} embedded />
+                      : <div className="bg-white rounded-2xl border border-slate-200 shadow-sm py-16 text-center"><button onClick={() => loadEditStats(eventSlug)} className="text-sm font-semibold text-violet-600 hover:text-violet-800 cursor-pointer">Load analytics</button></div>
+                )}
+
+                {editorSection === 'share' && (
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col gap-4 max-w-2xl">
+                    <div>
+                      <h3 className="text-base font-black text-slate-900">Share &amp; Open</h3>
+                      <p className="text-sm text-slate-500 mt-1">Share this link with attendees, or open the live event page.</p>
+                    </div>
+                    <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
+                      <code className="text-xs text-slate-600 truncate flex-1">{eventUrl}</code>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => navigator.clipboard.writeText(eventUrl).then(() => toast.success('Link copied!')).catch(() => toast.error('Copy failed'))}
+                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-600 text-white text-sm font-bold cursor-pointer hover:bg-violet-700 transition-colors active:scale-95">
+                        <Link2 size={14} /> Copy Link
+                      </button>
+                      <a href={eventUrl} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-sm font-bold cursor-pointer hover:bg-slate-50 transition-colors active:scale-95">
+                        <ExternalLink size={14} /> Open event
+                      </a>
+                    </div>
+                  </div>
+                )}
+
+                {editorSection === 'embed' && (
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col gap-4 max-w-2xl">
+                    <div>
+                      <h3 className="text-base font-black text-slate-900">Website Widget</h3>
+                      <p className="text-sm text-slate-500 mt-1">Floating button + popup panel. Paste before <code className="bg-slate-100 px-1 rounded">&lt;/body&gt;</code> on any page.</p>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <p className="text-xs font-semibold text-slate-600">Button position</p>
+                      <div className="flex gap-2 max-w-xs">
+                        {(['right', 'left'] as const).map(pos => (
+                          <button key={pos} onClick={() => setEmbedPosition(pos)}
+                            className={`flex-1 py-2 rounded-xl text-xs font-semibold border cursor-pointer transition-colors ${embedPosition === pos ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                            Bottom {pos.charAt(0).toUpperCase() + pos.slice(1)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="bg-slate-900 rounded-xl overflow-hidden">
+                      <pre className="text-xs text-emerald-400 font-mono px-4 py-4 overflow-x-auto leading-relaxed whitespace-pre">{embedCode}</pre>
+                    </div>
+                    <button onClick={() => navigator.clipboard.writeText(embedCode).then(() => toast.success('Widget code copied!')).catch(() => toast.error('Copy failed'))}
+                      className="self-start flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-600 text-white text-sm font-bold cursor-pointer hover:bg-violet-700 transition-colors active:scale-95">
+                      <Code2 size={15} /> Copy Widget Code
+                    </button>
+                  </div>
+                )}
+
+                {editorSection === 'delete' && (
+                  <div className="bg-white rounded-2xl border border-red-200 shadow-sm p-6 flex flex-col gap-4 max-w-2xl">
+                    <div>
+                      <h3 className="text-base font-black text-red-600">Danger Zone</h3>
+                      <p className="text-sm text-slate-500 mt-1">Permanently delete <span className="font-semibold text-slate-700">{eventName}</span>, including all its templates and analytics. This cannot be undone.</p>
+                    </div>
+                    {eventSlug === 'default' ? (
+                      <p className="text-sm text-slate-400">The default event cannot be deleted.</p>
+                    ) : confirmDeleteEvent ? (
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="text-sm font-semibold text-red-700">Delete this event?</span>
+                        <button onClick={handleDeleteCurrentEvent} disabled={isDeletingEvent}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-bold cursor-pointer hover:bg-red-700 transition-colors active:scale-95 disabled:opacity-50">
+                          {isDeletingEvent ? <Loader size={13} className="animate-spin" /> : <Trash2 size={13} />} Yes, delete
+                        </button>
+                        <button onClick={() => setConfirmDeleteEvent(false)} className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold cursor-pointer hover:bg-slate-50 transition-colors">Cancel</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setConfirmDeleteEvent(true)}
+                        className="self-start flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-50 text-red-600 border border-red-200 text-sm font-bold cursor-pointer hover:bg-red-100 transition-colors active:scale-95">
+                        <Trash2 size={15} /> Delete event
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+      ) : (
+      /* Main content — two-column on desktop */
       <div className="flex-1 flex flex-col lg:flex-row" style={{ minHeight: 0 }}>
 
         {/* ── CANVAS COLUMN (right on desktop, top on mobile when mapping) ── */}
@@ -349,23 +678,20 @@ export default function App() {
               className={[
                 'hidden lg:flex flex-shrink-0 items-center gap-3 px-4 py-3 rounded-2xl border-2 border-dashed cursor-pointer transition-all duration-200',
                 templateIsDragOver ? 'border-blue-500 bg-blue-50'
-                  : templateConfig.hasTemplate ? 'border-green-400 bg-green-50 hover:bg-green-100/60'
                   : 'border-slate-300 bg-white hover:border-blue-400 hover:bg-blue-50/40',
               ].join(' ')}
             >
               <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center flex-shrink-0">
-                {templateConfig.hasTemplate
-                  ? <FlipHorizontal size={18} className="text-green-600" />
-                  : <CloudUpload size={18} className="text-blue-600" />}
+                <CloudUpload size={18} className="text-blue-600" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-bold text-slate-700 truncate">
-                  {templateConfig.hasTemplate ? templateConfig.templateName : 'Click or drag to upload template'}
+                  Click or drag to add a template
                 </p>
                 <p className="text-[11px] text-slate-400">PNG, JPG or WEBP</p>
               </div>
-              {templateConfig.hasTemplate && (
-                <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full flex-shrink-0">Loaded</span>
+              {templates.length > 0 && (
+                <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full flex-shrink-0">{templates.length} added</span>
               )}
               <input ref={templateFileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) handleAdminTemplateFile(f); e.target.value = ''; }} />
@@ -375,10 +701,10 @@ export default function App() {
           {/* Canvas */}
           <div className="flex-1 bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm min-h-0 flex items-center justify-center">
             <CanvasPreview
-              templateConfig={templateConfig}
+              templateConfig={activeTemplate}
               userCroppedDataUrl={userCroppedDataUrl}
               profile={profile}
-              fontSettings={fontSettings}
+              fontSettings={activeFont}
               isMappingMode={isMappingMode && isAdminActive}
               isTextMappingMode={isTextMappingMode && isAdminActive}
               showSlotIndicators={isAdminActive}
@@ -391,7 +717,7 @@ export default function App() {
           {/* Desktop Generate button — form view only */}
           {currentView === 'form' && (
             <button
-              onClick={handleGenerate}
+              onClick={() => handleGenerate()}
               disabled={!canGenerate || isGenerating}
               className={['relative overflow-hidden flex flex-col items-center justify-center py-3 px-10 rounded-2xl text-white font-bold cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-violet-600 to-pink-500 active:scale-[0.98]', isGenerating ? 'shimmer-btn' : ''].join(' ')}
             >
@@ -462,21 +788,25 @@ export default function App() {
                         </div>
                         <AdminPanel
                           open={true}
-                          templateConfig={templateConfig}
+                          templateConfig={activeTemplate}
+                          templates={templates}
+                          activeKey={activeKey}
                           isMappingMode={isMappingMode}
                           isTextMappingMode={isTextMappingMode}
-                          fontSettings={fontSettings}
+                          fontSettings={activeFont}
                           sharingSettings={sharingSettings}
                           fieldSettings={fieldSettings}
                           isSavingTemplate={isSavingTemplate}
                           hideTemplateUpload={true}
                           onTemplateLoad={handleTemplateLoad}
+                          onSelectTemplate={handleSelectTemplate}
+                          onDeleteTemplate={handleDeleteTemplate}
                           onSlotChange={handleSlotChange}
                           onTextSlotChange={handleTextSlotChange}
                           onSaveMapping={handleSaveMapping}
                           onToggleMapping={handleToggleMapping}
                           onToggleTextMapping={handleToggleTextMapping}
-                          onFontChange={setFontSettings}
+                          onFontChange={handleFontChange}
                           onSharingChange={setSharingSettings}
                           onFieldSettingsChange={setFieldSettings}
                           eventSlug={eventSlug}
@@ -489,6 +819,16 @@ export default function App() {
                   {/* User-facing content — on desktop, hidden when admin is on settings tab */}
                   <div className={['flex flex-col gap-4', isAdminActive && adminTab === 'settings' ? 'hidden' : ''].join(' ')}>
 
+                  {/* Template gallery — only when the event has more than one template */}
+                  {templates.length > 1 && (
+                    <TemplateGallery
+                      templates={templates}
+                      activeKey={activeKey}
+                      keyOf={keyOf}
+                      onSelect={handleSelectTemplate}
+                    />
+                  )}
+
                   {/* Hero banner */}
                   <div className="bg-gradient-to-br from-violet-50 via-purple-50 to-pink-50 rounded-3xl border border-violet-100/60 p-5 sm:p-6 flex items-center justify-between gap-4">
                     <div className="flex-1 min-w-0">
@@ -500,7 +840,7 @@ export default function App() {
                     </div>
                     <div className="w-[72px] h-[72px] flex-shrink-0 bg-white/80 rounded-2xl border border-white/80 shadow-inner overflow-hidden">
                       {hasTemplate ? (
-                        <img src={templateConfig.templateDataUrl} alt="template" className="w-full h-full object-cover" />
+                        <img src={activeTemplate.templateDataUrl} alt="template" className="w-full h-full object-cover" />
                       ) : (
                         <div className="w-full h-full flex flex-col items-center justify-center gap-2 opacity-25">
                           <div className="w-8 h-6 rounded bg-slate-400" />
@@ -540,6 +880,7 @@ export default function App() {
                       croppedDataUrl={userCroppedDataUrl}
                       onFileSelected={handleFileSelected}
                       onRemove={handleRemovePhoto}
+                      onOpenPicker={openPicker}
                     />
                   </div>
 
@@ -585,9 +926,9 @@ export default function App() {
                     className="flex-1 flex items-center justify-center gap-1.5 py-3 text-xs font-semibold text-violet-600 hover:bg-violet-50 cursor-pointer transition-colors active:bg-violet-100">
                     <PenLine size={13} /> Edit details
                   </button>
-                  <button onClick={goBackToForm}
+                  <button onClick={openPicker}
                     className="flex-1 flex items-center justify-center gap-1.5 py-3 text-xs font-semibold text-violet-600 hover:bg-violet-50 cursor-pointer transition-colors active:bg-violet-100">
-                    Change photo
+                    <Camera size={13} /> Change photo
                   </button>
                 </div>
 
@@ -619,13 +960,14 @@ export default function App() {
 
         </div>{/* end left column */}
 
-      </div>{/* end two-column layout */}
+      </div>
+      )}{/* end two-column layout / section panels */}
 
       {/* Bottom CTA — only shown on form view (mobile only; desktop has button in right column) */}
-      {currentView === 'form' && (
+      {currentView === 'form' && !(isAdminActive && editorSection !== 'template') && (
         <div className="lg:hidden sticky bottom-0 z-10 bg-white border-t border-slate-100 px-4 py-3 sm:px-5" style={{ paddingBottom: 'calc(0.75rem + var(--safe-bottom))' }}>
           <button
-            onClick={handleGenerate}
+            onClick={() => handleGenerate()}
             disabled={!canGenerate || isGenerating}
             className={['relative overflow-hidden mx-auto flex flex-col items-center justify-center py-2.5 px-10 rounded-2xl text-white font-bold cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-violet-600 to-pink-500 active:scale-[0.98]', isGenerating ? 'shimmer-btn' : ''].join(' ')}
           >
@@ -646,7 +988,86 @@ export default function App() {
 
       {/* Modals */}
       {showAdminLogin && <AdminLogin onAuthenticated={handleAuthenticated} onClose={() => setShowAdminLogin(false)} />}
-      <CropModal open={cropModalOpen} imageSrc={userRawDataUrl} slot={templateConfig.imageSlot} onApply={handleCropApply} onClose={() => setCropModalOpen(false)} />
+      <CropModal open={cropModalOpen} imageSrc={userRawDataUrl} slot={activeTemplate.imageSlot} onApply={handleCropApply} onClose={() => setCropModalOpen(false)} />
+
+      {/* Hidden file inputs */}
+      <input ref={galleryInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) handleFileSelected(f); e.target.value = ''; }} />
+      <input ref={cameraInputRef} type="file" accept="image/*" capture="user" className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) handleFileSelected(f); e.target.value = ''; }} />
+
+      {/* Source picker bottom sheet */}
+      {showPicker && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center"
+          style={{ background: 'rgba(0,0,0,.5)' }} onClick={() => setShowPicker(false)}>
+          <div className="w-full max-w-sm bg-white rounded-t-2xl overflow-hidden"
+            onClick={e => e.stopPropagation()}>
+            <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mt-3 mb-1" />
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-5 pt-3 pb-2">
+              Select photo source
+            </p>
+            <button onClick={handleOpenWebcam}
+              className="w-full flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50 transition-colors cursor-pointer text-left">
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
+                style={{ background: 'linear-gradient(135deg,#7c3aed,#db2777)' }}>
+                <Camera size={22} className="text-white" />
+              </div>
+              <div>
+                <p className="font-bold text-slate-900 text-sm">Take a selfie</p>
+                <p className="text-xs text-slate-400 mt-0.5">Open selfie camera and capture</p>
+              </div>
+            </button>
+            <button onClick={() => { setShowPicker(false); galleryInputRef.current?.click(); }}
+              className="w-full flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50 transition-colors cursor-pointer text-left">
+              <div className="w-12 h-12 rounded-2xl bg-violet-100 flex items-center justify-center flex-shrink-0">
+                <ImageIcon size={22} className="text-violet-600" />
+              </div>
+              <div>
+                <p className="font-bold text-slate-900 text-sm">Choose from Gallery</p>
+                <p className="text-xs text-slate-400 mt-0.5">Browse your files or photos</p>
+              </div>
+            </button>
+            <div className="h-px bg-slate-100 mx-5 mt-1" />
+            <button onClick={() => setShowPicker(false)}
+              className="w-full py-4 text-sm font-semibold text-slate-500 hover:text-slate-700 transition-colors cursor-pointer">
+              Cancel
+            </button>
+            <div className="h-4" />
+          </div>
+        </div>
+      )}
+
+      {/* Webcam capture modal */}
+      {showWebcam && (
+        <div className="fixed inset-0 z-[60] bg-black flex flex-col">
+          <div className="flex-1 relative overflow-hidden">
+            <video ref={videoRef} autoPlay playsInline muted
+              onCanPlay={() => setCamReady(true)}
+              className="w-full h-full object-cover"
+              style={{ transform: 'scaleX(-1)' }} />
+            {!camReady && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black">
+                <div className="w-10 h-10 rounded-full border-2 border-white/20 border-t-white animate-spin" />
+              </div>
+            )}
+            <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-4 pb-2"
+              style={{ background: 'linear-gradient(to bottom,rgba(0,0,0,.55),transparent)' }}>
+              <button onClick={stopWebcam}
+                className="w-10 h-10 rounded-full bg-black/40 flex items-center justify-center text-white backdrop-blur-sm">
+                <X size={18} />
+              </button>
+              <p className="text-white text-sm font-semibold tracking-wide">Selfie Camera</p>
+              <div className="w-10" />
+            </div>
+          </div>
+          <div className="flex-shrink-0 flex items-center justify-center py-8 bg-black">
+            <button onClick={capturePhoto} disabled={!camReady}
+              className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center disabled:opacity-40 active:scale-95 transition-transform">
+              <div className="w-[62px] h-[62px] rounded-full bg-white" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

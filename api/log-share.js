@@ -1,7 +1,8 @@
+import { handleCors } from './_cors.js';
+import { sql } from './_db.js';
+
 async function logActivity(eventType, eventSlug, name, designation, company, email, platform, imageUrl, caption) {
-  if (!process.env.DATABASE_URL && !process.env.POSTGRES_URL) return;
   try {
-    const { sql } = await import('@vercel/postgres');
     await sql`
       CREATE TABLE IF NOT EXISTS activity_log (
         id SERIAL PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -17,6 +18,7 @@ async function logActivity(eventType, eventSlug, name, designation, company, ema
 }
 
 export default async function handler(req, res) {
+  if (handleCors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'Method not allowed' });
 
   try {

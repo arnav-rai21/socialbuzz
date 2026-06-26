@@ -1,11 +1,8 @@
 import { sql, ensureTables } from './_db.js';
-import crypto from 'crypto';
+import { uploadToS3 } from './_s3.js';
+import { handleCors } from './_cors.js';
 
-const DEFAULT_SLOT   = { x: 880, y: 640, width: 520, height: 520, radius: 32 };
-const EMPTY_TEMPLATE = {
-  hasTemplate: false, templateName: '', templateDataUrl: '',
-  imageSlot: DEFAULT_SLOT, updatedAt: '', fontSettings: null, sharingSettings: null,
-};
+const DEFAULT_SLOT = { x: 880, y: 640, width: 520, height: 520, radius: 32 };
 
 function sanitizeSlot(slot) {
   if (!slot) return DEFAULT_SLOT;
@@ -18,128 +15,172 @@ function sanitizeSlot(slot) {
   };
 }
 
-async function uploadToCloudinary(base64Data, existingPublicId) {
-  const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
-  const apiKey    = process.env.CLOUDINARY_API_KEY;
-  const apiSecret = process.env.CLOUDINARY_API_SECRET;
-  if (!cloudName || !apiKey || !apiSecret) {
-    throw new Error('Cloudinary credentials not configured. Add CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET to Vercel env vars.');
-  }
-
-  const folder    = 'socialbuzz';
-  const timestamp = Math.floor(Date.now() / 1000);
-  const sigParams = { folder, timestamp: String(timestamp) };
-  if (existingPublicId) { sigParams.overwrite = 'true'; sigParams.public_id = existingPublicId; }
-  // Cloudinary requires params sorted alphabetically when computing the signature
-  const sigString = Object.keys(sigParams).sort().map(k => `${k}=${sigParams[k]}`).join('&');
-  const signature = crypto.createHash('sha256').update(sigString + apiSecret).digest('hex');
-
-  const form = new FormData();
-  form.append('file', `data:image/png;base64,${base64Data}`);
-  form.append('api_key', apiKey);
-  form.append('timestamp', String(timestamp));
-  form.append('signature', signature);
-  form.append('folder', folder);
-  if (existingPublicId) {
-    form.append('public_id', existingPublicId);
-    form.append('overwrite', 'true');
-  }
-
-  const r      = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, { method: 'POST', body: form });
-  const result = await r.json();
-  if (!result.secure_url) throw new Error('Cloudinary upload failed: ' + JSON.stringify(result));
-  return result;
+function isValidSlug(slug) {
+  return /^[a-zA-Z0-9_-]+$/.test(slug);
 }
 
-async function loadTemplateConfig(slug) {
-  const { rows } = await sql`SELECT * FROM events_config WHERE slug = ${slug}`;
-  const stored = rows[0];
-  if (!stored || !stored.cloudinary_url) return EMPTY_TEMPLATE;
-  try {
-    const resp = await fetch(stored.cloudinary_url);
-    if (!resp.ok) return EMPTY_TEMPLATE;
-    const buf = await resp.arrayBuffer();
-    const ct  = (resp.headers.get('content-type') || 'image/png').split(';')[0];
-    const b64 = Buffer.from(buf).toString('base64');
-    const result = {
-      hasTemplate:     true,
-      templateName:    stored.template_name || '',
-      templateDataUrl: `data:${ct};base64,${b64}`,
-      imageSlot:       stored.image_slot || DEFAULT_SLOT,
-      updatedAt:       stored.updated_at  || '',
-    };
-    if (stored.text_slot)        result.textSlot        = stored.text_slot;
-    if (stored.font_settings)    result.fontSettings    = stored.font_settings;
-    if (stored.sharing_settings) result.sharingSettings = stored.sharing_settings;
-    if (stored.field_settings)   result.fieldSettings   = stored.field_settings;
-    return result;
-  } catch {
-    return EMPTY_TEMPLATE;
+// Build the TemplateConfig the frontend expects from a saved row + payload data url.
+function toTemplateConfig(row, templateDataUrl) {
+  const cfg = {
+    id:              row.id,
+    hasTemplate:     true,
+    templateName:    row.template_name || '',
+    templateDataUrl,
+    imageSlot:       row.image_slot || DEFAULT_SLOT,
+    isDefault:       !!row.is_default,
+    position:        row.position ?? 0,
+    updatedAt:       new Date().toISOString(),
+  };
+  if (row.text_slot)     cfg.textSlot     = row.text_slot;
+  if (row.font_settings) cfg.fontSettings = row.font_settings;
+  return cfg;
+}
+
+// Persist event-level settings (shared by all templates of the event).
+async function saveEventSettings(slug, sharingSettings, fieldSettings) {
+  await sql`
+    INSERT INTO events_config (slug, sharing_settings, field_settings, updated_at)
+    VALUES (
+      ${slug},
+      ${sharingSettings ? JSON.stringify(sharingSettings) : null},
+      ${fieldSettings   ? JSON.stringify(fieldSettings)   : null},
+      NOW()
+    )
+    ON CONFLICT (slug) DO UPDATE SET
+      sharing_settings = COALESCE(EXCLUDED.sharing_settings, events_config.sharing_settings),
+      field_settings   = COALESCE(EXCLUDED.field_settings,   events_config.field_settings),
+      updated_at       = NOW()`;
+}
+
+async function touchEvent(slug) {
+  const { rows } = await sql`SELECT slug FROM events_list WHERE slug = ${slug}`;
+  if (rows.length > 0) {
+    await sql`UPDATE events_list SET updated_at = NOW() WHERE slug = ${slug}`;
+  } else if (slug === 'default') {
+    await sql`INSERT INTO events_list (slug, name) VALUES ('default', 'Default Event') ON CONFLICT DO NOTHING`;
   }
+}
+
+// ── saveTemplate ───────────────────────────────────────────────────────────
+// Create (no templateId) or update (templateId) a single template row.
+async function saveTemplate(payload) {
+  if (!payload)                 throw new Error('No payload provided.');
+  if (!payload.templateDataUrl) throw new Error('Template image is required.');
+
+  const slug = payload.eventSlug || 'default';
+  if (!isValidSlug(slug)) throw new Error('Invalid event slug.');
+
+  const imageSlot = sanitizeSlot(payload.imageSlot);
+  const fileName  = payload.fileName || `template_${slug}.png`;
+  const textSlotJson     = payload.textSlot     ? JSON.stringify(payload.textSlot)     : null;
+  const fontSettingsJson = payload.fontSettings ? JSON.stringify(payload.fontSettings) : null;
+  const slotJson         = JSON.stringify(imageSlot);
+
+  const match = String(payload.templateDataUrl).match(/^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/);
+
+  let row;
+  const templateId = payload.templateId ? parseInt(payload.templateId) : null;
+
+  if (templateId) {
+    // ── UPDATE existing template ──
+    const { rows: existing } = await sql`SELECT * FROM event_templates WHERE id = ${templateId} AND slug = ${slug}`;
+    if (existing.length === 0) throw new Error('Template not found.');
+
+    let imageUrl = existing[0].image_url;
+    let imageKey = existing[0].image_key;
+    // Only re-upload if the data URL is a freshly-loaded image (not the base64 we served back)
+    if (match) {
+      const s3Key = `socialbuzz/templates/${slug}/${templateId}.png`;
+      const up = await uploadToS3(match[2], s3Key, 'image/png');
+      imageUrl = up.url; imageKey = up.key;
+    }
+    const { rows: updated } = await sql`
+      UPDATE event_templates SET
+        template_name = ${fileName},
+        image_url     = ${imageUrl},
+        image_key     = ${imageKey},
+        image_slot    = ${slotJson},
+        text_slot     = ${textSlotJson},
+        font_settings = ${fontSettingsJson},
+        updated_at    = NOW()
+      WHERE id = ${templateId} AND slug = ${slug}
+      RETURNING *`;
+    row = updated[0];
+  } else {
+    // ── CREATE new template ──
+    if (!match) throw new Error('Invalid template image format. Must be PNG, JPEG, or WebP.');
+
+    // First template of an event becomes the default.
+    const { rows: countRows } = await sql`SELECT COUNT(*)::int AS n FROM event_templates WHERE slug = ${slug}`;
+    const isFirst = countRows[0].n === 0;
+    const position = countRows[0].n;
+
+    const { rows: inserted } = await sql`
+      INSERT INTO event_templates (slug, template_name, image_slot, text_slot, font_settings, position, is_default)
+      VALUES (${slug}, ${fileName}, ${slotJson}, ${textSlotJson}, ${fontSettingsJson}, ${position}, ${isFirst})
+      RETURNING *`;
+    row = inserted[0];
+
+    // Upload using the new id in the key, then store the url.
+    const s3Key = `socialbuzz/templates/${slug}/${row.id}.png`;
+    const up = await uploadToS3(match[2], s3Key, 'image/png');
+    const { rows: withImg } = await sql`
+      UPDATE event_templates SET image_url = ${up.url}, image_key = ${up.key}
+      WHERE id = ${row.id} RETURNING *`;
+    row = withImg[0];
+  }
+
+  await saveEventSettings(slug, payload.sharingSettings, payload.fieldSettings);
+  await touchEvent(slug);
+
+  // Return saved config immediately from the payload data url — avoids a slow S3 round-trip.
+  const cfg = toTemplateConfig(row, payload.templateDataUrl);
+  if (payload.sharingSettings) cfg.sharingSettings = payload.sharingSettings;
+  if (payload.fieldSettings)   cfg.fieldSettings   = payload.fieldSettings;
+  return cfg;
+}
+
+// ── deleteTemplate ─────────────────────────────────────────────────────────
+async function deleteTemplate(slug, templateId) {
+  if (!isValidSlug(slug)) throw new Error('Invalid event slug.');
+  const id = parseInt(templateId);
+  if (!id) throw new Error('templateId is required.');
+
+  const { rows: all } = await sql`SELECT id, is_default FROM event_templates WHERE slug = ${slug} ORDER BY position, id`;
+  if (all.length <= 1) throw new Error('Cannot delete the last template. An event needs at least one.');
+
+  const target = all.find(t => t.id === id);
+  if (!target) throw new Error('Template not found.');
+
+  await sql`DELETE FROM event_templates WHERE id = ${id} AND slug = ${slug}`;
+
+  // If we deleted the default, promote the first remaining template.
+  if (target.is_default) {
+    const next = all.find(t => t.id !== id);
+    if (next) await sql`UPDATE event_templates SET is_default = TRUE WHERE id = ${next.id}`;
+  }
+  await touchEvent(slug);
+  return { success: true };
 }
 
 export default async function handler(req, res) {
+  if (handleCors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'Method not allowed' });
 
   try {
     await ensureTables();
-    const { payload } = req.body || {};
-    if (!payload)                 throw new Error('No payload provided.');
-    if (!payload.templateDataUrl) throw new Error('Template image is required.');
+    const body = req.body || {};
+    const action = body.action || 'saveTemplate';
 
-    const eventSlug = payload.eventSlug || 'default';
-    const fileName  = payload.fileName  || `template_${eventSlug}.png`;
-    const imageSlot = sanitizeSlot(payload.imageSlot);
-
-    const match = String(payload.templateDataUrl).match(/^data:[^;]+;base64,(.+)$/);
-    if (!match) throw new Error('Invalid template image format.');
-
-    const { rows } = await sql`SELECT cloudinary_public_id FROM events_config WHERE slug = ${eventSlug}`;
-    const existingPublicId = rows[0]?.cloudinary_public_id || null;
-    const uploaded         = await uploadToCloudinary(match[1], existingPublicId);
-
-    await sql`
-      INSERT INTO events_config (slug, cloudinary_url, cloudinary_public_id, template_name, image_slot, text_slot, font_settings, sharing_settings, field_settings, updated_at)
-      VALUES (
-        ${eventSlug}, ${uploaded.secure_url}, ${uploaded.public_id}, ${fileName},
-        ${JSON.stringify(imageSlot)},
-        ${payload.textSlot        ? JSON.stringify(payload.textSlot)        : null},
-        ${payload.fontSettings    ? JSON.stringify(payload.fontSettings)    : null},
-        ${payload.sharingSettings ? JSON.stringify(payload.sharingSettings) : null},
-        ${payload.fieldSettings   ? JSON.stringify(payload.fieldSettings)   : null},
-        NOW()
-      )
-      ON CONFLICT (slug) DO UPDATE SET
-        cloudinary_url       = EXCLUDED.cloudinary_url,
-        cloudinary_public_id = EXCLUDED.cloudinary_public_id,
-        template_name        = EXCLUDED.template_name,
-        image_slot           = EXCLUDED.image_slot,
-        text_slot            = EXCLUDED.text_slot,
-        font_settings        = EXCLUDED.font_settings,
-        sharing_settings     = EXCLUDED.sharing_settings,
-        field_settings       = EXCLUDED.field_settings,
-        updated_at           = NOW()`;
-
-    const { rows: listRows } = await sql`SELECT slug FROM events_list WHERE slug = ${eventSlug}`;
-    if (listRows.length > 0) {
-      await sql`UPDATE events_list SET updated_at = NOW() WHERE slug = ${eventSlug}`;
-    } else if (eventSlug === 'default') {
-      await sql`INSERT INTO events_list (slug, name) VALUES ('default', 'Default Event') ON CONFLICT DO NOTHING`;
+    if (action === 'saveTemplate') {
+      const data = await saveTemplate(body.payload);
+      return res.status(200).json({ success: true, data });
     }
-
-    // Return the saved config immediately from payload — avoids a slow Cloudinary round-trip
-    const savedConfig = {
-      hasTemplate:     true,
-      templateName:    fileName,
-      templateDataUrl: payload.templateDataUrl,
-      imageSlot:       imageSlot,
-      updatedAt:       new Date().toISOString(),
-    };
-    if (payload.textSlot)        savedConfig.textSlot        = payload.textSlot;
-    if (payload.fontSettings)    savedConfig.fontSettings    = payload.fontSettings;
-    if (payload.sharingSettings) savedConfig.sharingSettings = payload.sharingSettings;
-    if (payload.fieldSettings)   savedConfig.fieldSettings   = payload.fieldSettings;
-    return res.status(200).json({ success: true, data: savedConfig });
+    if (action === 'deleteTemplate') {
+      const data = await deleteTemplate(body.eventSlug || 'default', body.templateId);
+      return res.status(200).json({ success: true, data });
+    }
+    return res.status(400).json({ success: false, error: 'Unknown action' });
   } catch (err) {
     return res.status(200).json({ success: false, error: err.message });
   }

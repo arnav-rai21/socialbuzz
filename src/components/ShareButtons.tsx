@@ -40,11 +40,35 @@ async function fetchBlob(src: string): Promise<Blob> {
   return (await fetch(src, { mode: 'cors' })).blob();
 }
 
-async function copyBlobToClipboard(blob: Blob): Promise<boolean> {
+// Browsers only accept image/png on the clipboard — the generated post is JPEG,
+// so convert first or the copy silently fails (and paste-to-attach won't work).
+async function toPngBlob(blob: Blob): Promise<Blob> {
+  if (blob.type === 'image/png') return blob;
   try {
-    await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
+    return await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob(b => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png'));
+  } catch { return blob; }
+}
+
+async function copyImageToClipboard(blob: Blob): Promise<boolean> {
+  try {
+    const png = await toPngBlob(blob);
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
     return true;
   } catch (_) { return false; }
+}
+
+async function copyBlobToClipboard(blob: Blob): Promise<boolean> {
+  return copyImageToClipboard(blob);
+}
+
+function copyTextSafe(text: string) {
+  if (text && navigator.clipboard?.writeText) navigator.clipboard.writeText(text).catch(() => {});
 }
 
 function downloadBlob(blob: Blob, fileName = 'social-post.png') {
@@ -58,6 +82,13 @@ function downloadBlob(blob: Blob, fileName = 'social-post.png') {
 
 const isMac    = /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const pasteKey = isMac ? '⌘V' : 'Ctrl+V';
+
+// The native share sheet is only the right tool on phones/tablets. On desktop it
+// surfaces AirDrop/Notes/Copy (useless for social posting), so desktop must use the
+// per-platform web composers instead. iPadOS reports as "Macintosh" + touch points.
+const isMobileDevice =
+  /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+  (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent));
 
 // ── Platform definitions ──────────────────────────────────────────────────────
 
@@ -101,6 +132,24 @@ export default function ShareButtons({
   const popupRef    = useRef<Window | null>(null);
   const intervalsRef = useRef<{ token: ReturnType<typeof setInterval>; closed: ReturnType<typeof setInterval> } | null>(null);
 
+  // Pre-build the shareable image File as soon as the post is ready, so the native
+  // share sheet can be opened immediately on tap without an intervening `await`
+  // (awaiting inside the tap handler drops the gesture and breaks file-sharing on iOS).
+  const shareFileRef = useRef<File | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const src = finalImageDataUrl || imageSrc;
+    if (!src) { shareFileRef.current = null; return; }
+    fetchBlob(src)
+      .then(blob => {
+        if (cancelled) return;
+        const name = (generatedAsset?.fileName || 'social-post.png').replace(/\.(jpe?g|webp)$/i, '.png');
+        shareFileRef.current = new File([blob], name, { type: blob.type || 'image/jpeg' });
+      })
+      .catch(() => { if (!cancelled) shareFileRef.current = null; });
+    return () => { cancelled = true; };
+  }, [finalImageDataUrl, imageSrc, generatedAsset]);
+
   useEffect(() => () => {
     if (intervalsRef.current) {
       clearInterval(intervalsRef.current.token);
@@ -142,6 +191,19 @@ export default function ShareButtons({
     return [caption.trim(), hashtags.trim()].filter(Boolean).join('\n\n');
   }
 
+  // Build the public OG share-page URL carrying the caption so WhatsApp / Facebook /
+  // X render a rich preview card (image + title + caption) instead of a bare link.
+  // IMPORTANT: build it from the *current* origin — the server's publicUrl uses a
+  // domain that 307-redirects, and preview crawlers don't follow that redirect.
+  function buildSharePageUrl(cap: string): string {
+    const origin   = typeof window !== 'undefined' ? window.location.origin : '';
+    const imageUrl = generatedAsset?.imageUrl || '';
+    if (!origin || !imageUrl) return generatedAsset?.publicUrl || '';
+    let base = `${origin}/api/share?img=${encodeURIComponent(imageUrl)}`;
+    if (cap) base += '&t=' + encodeURIComponent(cap.slice(0, 220));
+    return base;
+  }
+
   function logShare(platform: string) {
     callLogShareEvent({
       name:        profile.name,
@@ -158,103 +220,72 @@ export default function ShareButtons({
   // ── Generic share (non-LinkedIn) ──────────────────────────────────────────
 
   async function executeShare(platform: typeof PLATFORMS[number]) {
-    const blob     = await fetchBlob(finalImageDataUrl).catch(() => fetchBlob(imageSrc));
-    const fileName = generatedAsset.fileName || 'social-post.png';
-    const cap      = fullCaption();
-    const cloudUrl = generatedAsset.imageUrl || '';
+    const cap          = fullCaption();
+    const fileName     = generatedAsset.fileName || 'social-post.png';
+    const cloudUrl     = generatedAsset.imageUrl || '';
+    const pageUrl      = buildSharePageUrl(cap);   // OG preview page (image + caption)
+    const preparedFile = shareFileRef.current;     // built ahead of time (see effect)
+    const hasWebShare  = typeof navigator.share === 'function';
 
-    // ── Mobile: Web Share API ──────────────────────────────────────────────
-    if (navigator.share) {
-      try {
-        const file        = new File([blob], fileName, { type: blob.type });
-        const canShareFile = typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] });
+    // ── Mobile only: hand the real image FILE to the native share sheet ──────
+    // Called before any `await` so the tap's gesture activation stays valid.
+    // (Desktop skips this — its share sheet can't post to social apps.)
+    const canShareFile = isMobileDevice && !!preparedFile && hasWebShare
+      && (typeof navigator.canShare !== 'function' || navigator.canShare({ files: [preparedFile] }));
 
-        if (!canShareFile && !cloudUrl) throw new Error('no-share-target');
-
-        closeModal();
-
-        if (canShareFile) {
-          await navigator.share({ title: 'My Social Media Post', text: cap, files: [file] });
-        } else {
-          await navigator.share({ title: 'My Social Media Post', text: [cap, cloudUrl].filter(Boolean).join('\n\n') });
-        }
-        toast.success('Shared!');
-        logShare(platform.key);
-        return;
-      } catch (e: any) {
-        if (e?.name === 'AbortError') return;
-      }
-    }
-
-    // ── Desktop / fallback ─────────────────────────────────────────────────
-
-    if (platform.key === 'whatsapp') {
-      downloadBlob(blob, fileName);
-      const waText = [cap, cloudUrl].filter(Boolean).join('\n\n');
-      setTimeout(() => window.open('https://wa.me/?text=' + encodeURIComponent(waText), '_blank', 'noopener,noreferrer'), 350);
-      toast.info('Image downloaded — open WhatsApp, tap Attach and select the file.', { duration: 9000 });
-      logShare(platform.key);
+    if (canShareFile) {
       closeModal();
+      try {
+        await navigator.share({ title: 'My Social Media Post', text: cap, files: [preparedFile!] });
+        logShare(platform.key);
+      } catch (e: any) { /* AbortError = user cancelled; nothing to do */ }
       return;
     }
 
-    if (platform.key === 'instagram') {
-      downloadBlob(blob, fileName);
-      setTimeout(() => window.open('https://www.instagram.com/', '_blank', 'noopener,noreferrer'), 350);
-      toast.info('Image downloaded — open Instagram, tap + New Post, and select the downloaded file.', { duration: 10000 });
-      logShare(platform.key);
+    // Mobile without file support → share text+link (still never downloads).
+    if (isMobileDevice && hasWebShare) {
       closeModal();
+      try {
+        await navigator.share({ title: 'My Social Media Post', text: [cap, pageUrl || cloudUrl].filter(Boolean).join('\n\n') });
+        logShare(platform.key);
+      } catch (e: any) { /* AbortError = cancelled */ }
+      return;
+    }
+
+    // ── Desktop: open the platform's web composer ───────────────────────────
+    // Web composers can't be handed an image file, so we point them at the OG
+    // preview page — X and Facebook render the image (and caption) as a card
+    // automatically. No clipboard writes, no downloads, no nag toasts.
+    closeModal();
+    logShare(platform.key);
+
+    if (platform.key === 'whatsapp') {
+      const waText = [cap, pageUrl].filter(Boolean).join('\n\n');
+      window.open('https://wa.me/?text=' + encodeURIComponent(waText), '_blank', 'noopener,noreferrer');
       return;
     }
 
     if (platform.key === 'x') {
-      const copied    = await copyBlobToClipboard(blob);
-      const tweetParts = [cap, cloudUrl].filter(Boolean);
-      const tweetUrl  = 'https://x.com/compose/post?text=' + encodeURIComponent(tweetParts.join('\n\n'));
-      setTimeout(() => window.open(tweetUrl, '_blank', 'noopener,noreferrer'), 300);
-      if (copied) {
-        toast.success(`Image copied! In the X compose window, press ${pasteKey} to attach it as a photo.`, { duration: 10000 });
-      } else {
-        downloadBlob(blob, fileName);
-        toast.info('Image downloaded — attach it in the X compose window.', { duration: 8000 });
-      }
-      logShare(platform.key);
-      closeModal();
+      const tweetUrl = 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(cap)
+        + (pageUrl ? '&url=' + encodeURIComponent(pageUrl) : '');
+      window.open(tweetUrl, '_blank', 'noopener,noreferrer');
       return;
     }
 
     if (platform.key === 'facebook') {
-      const copied = await copyBlobToClipboard(blob);
-      if (cloudUrl) {
-        const fbUrl = 'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(cloudUrl);
-        setTimeout(() => window.open(fbUrl, '_blank', 'noopener,noreferrer'), 300);
-        if (!copied) downloadBlob(blob, fileName);
-        toast.success('Opening Facebook share — your image URL is attached.', { duration: 7000 });
-      } else {
-        setTimeout(() => window.open('https://www.facebook.com/', '_blank', 'noopener,noreferrer'), 300);
-        if (copied) {
-          toast.success(`Image copied! Press ${pasteKey} to attach it in Facebook.`, { duration: 9000 });
-        } else {
-          downloadBlob(blob, fileName);
-          toast.info('Image downloaded — attach it in the Facebook post composer.', { duration: 7000 });
-        }
-      }
-      logShare(platform.key);
-      closeModal();
+      const u = pageUrl || cloudUrl;
+      window.open('https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(u), '_blank', 'noopener,noreferrer');
       return;
     }
 
-    const copied = await copyBlobToClipboard(blob);
-    const url = platform.composeUrl as string;
-    if (url) setTimeout(() => window.open(url, '_blank', 'noopener,noreferrer'), 300);
-    if (copied) {
-      toast.success(`Image copied! Press ${pasteKey} to attach it in ${platform.label}.`, { duration: 9000 });
-    } else {
+    if (platform.key === 'instagram') {
+      // Instagram has no web composer at all — downloading is the only option.
+      const blob = preparedFile ?? await fetchBlob(finalImageDataUrl).catch(() => fetchBlob(imageSrc));
       downloadBlob(blob, fileName);
-      toast.info(`Image downloaded — attach it in the ${platform.label} composer.`, { duration: 7000 });
+      window.open('https://www.instagram.com/', '_blank', 'noopener,noreferrer');
+      toast.info('Image downloaded — open Instagram and create a new post with it.', { duration: 6000 });
+      return;
     }
-    logShare(platform.key);
-    closeModal();
   }
 
   // ── LinkedIn OAuth + post ─────────────────────────────────────────────────

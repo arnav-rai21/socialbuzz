@@ -1,22 +1,26 @@
 import React, { useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Briefcase, Building2, CloudUpload, Crosshair, FlipHorizontal, Loader, Mail, Save, Type, User } from 'lucide-react';
+import { Briefcase, Building2, CloudUpload, Crosshair, FlipHorizontal, Loader, Mail, Plus, Save, Trash2, Type, User } from 'lucide-react';
 import { toast } from 'sonner';
 import type { FieldSettings, FontSettings, ImageSlot, SharingSettings, TemplateConfig, TextSlot } from '../types';
 import { DEFAULT_FIELD_SETTINGS, DEFAULT_FONT_SETTINGS, DEFAULT_SHARING_SETTINGS } from '../types';
 
 interface AdminPanelProps {
-  open: boolean;
-  templateConfig: TemplateConfig;
-  isMappingMode: boolean;
-  isTextMappingMode: boolean;
-  fontSettings: FontSettings;
-  sharingSettings: SharingSettings;
-  fieldSettings: FieldSettings;
-  onTemplateLoad: (dataUrl: string, fileName: string) => void;
-  onSlotChange: (slot: ImageSlot) => void;
-  onTextSlotChange: (slot: TextSlot | undefined) => void;
-  isSavingTemplate: boolean;
+  open:                boolean;
+  templateConfig:      TemplateConfig;
+  templates:           TemplateConfig[];
+  activeKey:           string;
+  isMappingMode:       boolean;
+  isTextMappingMode:   boolean;
+  fontSettings:        FontSettings;
+  sharingSettings:     SharingSettings;
+  fieldSettings:       FieldSettings;
+  onTemplateLoad:      (dataUrl: string, fileName: string) => void;
+  onSelectTemplate:    (key: string) => void;
+  onDeleteTemplate:    (t: TemplateConfig) => void;
+  onSlotChange:        (slot: ImageSlot) => void;
+  onTextSlotChange:    (slot: TextSlot | undefined) => void;
+  isSavingTemplate:    boolean;
   hideTemplateUpload?: boolean;
   onSaveMapping: () => void;
   onToggleMapping: () => void;
@@ -27,6 +31,9 @@ interface AdminPanelProps {
   eventSlug?: string;
   onViewDashboard?: () => void;
 }
+
+// Stable client key for a template: its DB id, or 'new' for an unsaved draft.
+const keyOf = (t: TemplateConfig): string => (t.id != null ? String(t.id) : 'new');
 
 const FONT_FAMILIES = [
   { label: 'Inter', value: 'Inter, Arial, sans-serif' },
@@ -40,9 +47,9 @@ const FONT_FAMILIES = [
 ];
 
 export default function AdminPanel({
-  open, templateConfig, isMappingMode, isTextMappingMode,
+  open, templateConfig, templates, activeKey, isMappingMode, isTextMappingMode,
   fontSettings, sharingSettings, fieldSettings, isSavingTemplate, hideTemplateUpload,
-  onTemplateLoad, onSlotChange, onTextSlotChange, onSaveMapping, onToggleMapping, onToggleTextMapping,
+  onTemplateLoad, onSelectTemplate, onDeleteTemplate, onSlotChange, onTextSlotChange, onSaveMapping, onToggleMapping, onToggleTextMapping,
   onFontChange, onSharingChange, onFieldSettingsChange,
   eventSlug, onViewDashboard,
 }: AdminPanelProps) {
@@ -109,6 +116,60 @@ export default function AdminPanel({
               <span className="ml-auto text-xs font-medium text-slate-500 bg-slate-100 border border-slate-200 rounded-full px-2.5 py-0.5">
                 Editing: {eventSlug || 'default'}
               </span>
+            </div>
+
+            {/* Templates strip — pick which template to edit, add or delete */}
+            <div>
+              <SectionLabel>Templates</SectionLabel>
+              <p className="text-xs text-slate-400 -mt-1 mb-2">Attendees pick one of these. Select a thumbnail to edit it.</p>
+              <div className="flex gap-2.5 overflow-x-auto pb-1">
+                {templates.map((t) => {
+                  const k = keyOf(t);
+                  const isActive = k === activeKey;
+                  return (
+                    <div key={k} className="relative flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => onSelectTemplate(k)}
+                        className={[
+                          'w-20 h-20 rounded-xl overflow-hidden border-2 transition-all cursor-pointer bg-slate-100',
+                          isActive ? 'border-violet-600 ring-2 ring-violet-200' : 'border-slate-200 hover:border-violet-300',
+                        ].join(' ')}
+                        title={t.templateName}
+                      >
+                        {t.templateDataUrl
+                          ? <img src={t.templateDataUrl} alt={t.templateName} className="w-full h-full object-cover" />
+                          : <span className="text-[10px] text-slate-400">No image</span>}
+                      </button>
+                      {t.id == null && (
+                        <span className="absolute top-1 left-1 text-[8px] font-bold text-white bg-amber-500 px-1 py-0.5 rounded">DRAFT</span>
+                      )}
+                      {t.isDefault && (
+                        <span className="absolute bottom-1 left-1 text-[8px] font-bold text-white bg-violet-600 px-1 py-0.5 rounded">DEFAULT</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => onDeleteTemplate(t)}
+                        disabled={templates.filter(x => x.id != null).length <= 1 && t.id != null}
+                        title="Delete template"
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-white border border-slate-200 flex items-center justify-center hover:bg-red-50 hover:border-red-200 cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <Trash2 size={11} className="text-slate-400 hover:text-red-500" />
+                      </button>
+                    </div>
+                  );
+                })}
+                {/* Add tile */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-20 h-20 flex-shrink-0 rounded-xl border-2 border-dashed border-slate-300 flex flex-col items-center justify-center gap-1 text-slate-400 hover:border-violet-400 hover:text-violet-500 hover:bg-violet-50/40 cursor-pointer transition-all"
+                  title="Add a template"
+                >
+                  <Plus size={18} />
+                  <span className="text-[10px] font-bold">Add</span>
+                </button>
+              </div>
             </div>
 
             {/* Photo mapping mode */}

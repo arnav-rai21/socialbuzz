@@ -63,14 +63,18 @@ export const DEFAULT_FIELD_SETTINGS: FieldSettings = {
 };
 
 export interface TemplateConfig {
+  id?:              number;      // DB id of the template row (undefined = unsaved/new)
   hasTemplate:      boolean;
   templateName:     string;
   templateDataUrl:  string;
   imageSlot:        ImageSlot;
   textSlot?:        TextSlot;
+  isDefault?:       boolean;
+  position?:        number;
   updatedAt?:       string;
   error?:           string;
   fontSettings?:    FontSettings;
+  // Event-level settings — present on the bootstrap default template for back-compat.
   sharingSettings?: SharingSettings;
   fieldSettings?:   FieldSettings;
 }
@@ -99,15 +103,25 @@ export interface EventMeta {
 }
 
 export interface EventStats {
-  totalGenerates: number;
-  totalShares:    number;
-  byPlatform:     Record<string, number>;
-  recentUsers:    Array<{
+  totalGenerates:  number;
+  totalShares:     number;
+  byPlatform:      Record<string, number>;
+  uniqueUsers?:    number;
+  uniqueCompanies?: number;
+  shareRate?:      number;   // shares / generates, as a percentage
+  generatesToday?: number;
+  generates7d?:    number;
+  lastActivity?:   string;
+  topCompanies?:   Array<{ company: string; count: number }>;
+  daily?:          Array<{ day: string; generates: number; shares: number }>;
+  recentUsers:     Array<{
     timestamp: string;
     eventType: string;
     name:      string;
+    title?:    string;
     company:   string;
     email:     string;
     platform:  string;
+    imageUrl?: string;
   }>;
 }

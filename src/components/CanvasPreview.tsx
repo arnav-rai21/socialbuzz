@@ -278,7 +278,23 @@ export default function CanvasPreview({
 
     drawProfileText(ctx, renderProfile, slot, canvas.height, resolvedFont, templateConfig.textSlot);
 
-    try { onCanvasDataUrl(canvas.toDataURL('image/png')); } catch (_) {}
+    // Cap at 1200px wide before encoding — keeps the upload body small (<200 KB)
+    // regardless of the source template resolution. Social platforms cap display
+    // at 1200px anyway, so there is no visual loss for the end recipient.
+    try {
+      const MAX_W = 1200;
+      if (canvas.width > MAX_W) {
+        const scale   = MAX_W / canvas.width;
+        const tmp     = document.createElement('canvas');
+        tmp.width     = MAX_W;
+        tmp.height    = Math.round(canvas.height * scale);
+        const tmpCtx  = tmp.getContext('2d');
+        if (tmpCtx) { tmpCtx.drawImage(canvas, 0, 0, tmp.width, tmp.height); }
+        onCanvasDataUrl(tmp.toDataURL('image/jpeg', 0.82));
+      } else {
+        onCanvasDataUrl(canvas.toDataURL('image/jpeg', 0.82));
+      }
+    } catch (_) {}
 
     syncOverlay();
   // eslint-disable-next-line react-hooks/exhaustive-deps

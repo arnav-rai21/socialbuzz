@@ -1,5 +1,6 @@
 import { sql, ensureTables } from './_db.js';
 import crypto from 'crypto';
+import { handleCors } from './_cors.js';
 
 const APP_BASE_URL = process.env.APP_BASE_URL || 'https://socialbuzz.vercel.app';
 
@@ -24,7 +25,10 @@ async function getLinkedInAuthUrl() {
     'https://www.linkedin.com/oauth/v2/authorization' +
     `?response_type=code&client_id=${encodeURIComponent(clientId)}` +
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-    `&state=${state}&scope=${encodeURIComponent('openid profile email w_member_social')}&nonce=${nonce}`;
+    `&state=${state}&scope=${encodeURIComponent('openid profile email w_member_social')}&nonce=${nonce}` +
+    // Request LinkedIn's extended sign-in options (Google, Apple, passkey, password).
+    // LinkedIn decides whether to actually show them per device/browser/account/rollout.
+    `&enable_extended_login=true`;
 
   return { authUrl, state, redirectUri };
 }
@@ -119,6 +123,7 @@ async function postToLinkedIn(state, imageUrl, caption) {
 }
 
 export default async function handler(req, res) {
+  if (handleCors(req, res)) return;
   try {
     await ensureTables();
 

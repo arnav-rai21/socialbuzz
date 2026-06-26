@@ -31,6 +31,36 @@ export async function ensureTables() {
       updated_at           TIMESTAMPTZ DEFAULT NOW()
     )`;
   await sql`ALTER TABLE events_config ADD COLUMN IF NOT EXISTS field_settings JSONB`;
+
+  // ── Multi-template: one row per template, many per event slug ──────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS event_templates (
+      id            SERIAL PRIMARY KEY,
+      slug          TEXT NOT NULL,
+      template_name TEXT,
+      image_url     TEXT,
+      image_key     TEXT,
+      image_slot    JSONB,
+      text_slot     JSONB,
+      font_settings JSONB,
+      position      INT DEFAULT 0,
+      is_default    BOOLEAN DEFAULT FALSE,
+      created_at    TIMESTAMPTZ DEFAULT NOW(),
+      updated_at    TIMESTAMPTZ DEFAULT NOW()
+    )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_event_templates_slug ON event_templates (slug)`;
+
+  // Idempotent migration: lift each legacy single-template events_config row
+  // (which still has its image in cloudinary_url) into event_templates, unless
+  // that slug already has templates. Zero data loss for existing events.
+  await sql`
+    INSERT INTO event_templates (slug, template_name, image_url, image_key, image_slot, text_slot, font_settings, position, is_default)
+    SELECT ec.slug, ec.template_name, ec.cloudinary_url, ec.cloudinary_public_id,
+           ec.image_slot, ec.text_slot, ec.font_settings, 0, TRUE
+    FROM events_config ec
+    WHERE ec.cloudinary_url IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM event_templates et WHERE et.slug = ec.slug)`;
+
   await sql`
     CREATE TABLE IF NOT EXISTS admins_approved (
       email       TEXT PRIMARY KEY,

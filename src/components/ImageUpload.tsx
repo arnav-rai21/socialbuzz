@@ -1,38 +1,22 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { Camera, CheckCircle, Trash2 } from 'lucide-react';
-import { toast } from 'sonner';
 
 interface ImageUploadProps {
   rawDataUrl:     string;
   croppedDataUrl: string;
   onFileSelected: (file: File) => void;
   onRemove?:      () => void;
+  onOpenPicker:   () => void;
 }
 
-export default function ImageUpload({ rawDataUrl, croppedDataUrl, onFileSelected, onRemove }: ImageUploadProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  function handleFile(file: File) {
-    if (!file.type.startsWith('image/')) {
-      toast.error('Please select a valid image file (PNG, JPG, WEBP).');
-      return;
-    }
-    onFileSelected(file);
-  }
-
-  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) handleFile(file);
-    e.target.value = '';
-  }
-
+export default function ImageUpload({ rawDataUrl, croppedDataUrl, onFileSelected, onRemove, onOpenPicker }: ImageUploadProps) {
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
+    if (file?.type.startsWith('image/')) onFileSelected(file);
   }
 
-  const hasImage  = Boolean(rawDataUrl || croppedDataUrl);
+  const hasImage   = Boolean(rawDataUrl || croppedDataUrl);
   const previewSrc = croppedDataUrl || rawDataUrl;
 
   if (hasImage) {
@@ -49,32 +33,27 @@ export default function ImageUpload({ rawDataUrl, croppedDataUrl, onFileSelected
           <p className="text-xs text-slate-400 mt-0.5">Tap to change or remove</p>
         </div>
         <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => fileInputRef.current?.click()}
+          <button onClick={onOpenPicker}
             className="w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-colors"
-            title="Change photo"
-          >
+            title="Change photo">
             <Camera size={14} className="text-slate-500" />
           </button>
           {onRemove && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onRemove(); }}
+            <button onClick={e => { e.stopPropagation(); onRemove(); }}
               className="w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center cursor-pointer hover:bg-red-50 hover:border-red-200 transition-colors"
-              title="Remove photo"
-            >
+              title="Remove photo">
               <Trash2 size={14} className="text-slate-400 hover:text-red-500" />
             </button>
           )}
         </div>
-        <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleChange} />
       </div>
     );
   }
 
   return (
     <div
-      onClick={() => fileInputRef.current?.click()}
-      onDragOver={(e) => e.preventDefault()}
+      onClick={onOpenPicker}
+      onDragOver={e => e.preventDefault()}
       onDrop={handleDrop}
       className="border-2 border-dashed border-slate-200 rounded-2xl p-5 flex items-center gap-4 cursor-pointer hover:border-violet-400 hover:bg-violet-50/40 transition-all duration-200"
     >
@@ -83,9 +62,8 @@ export default function ImageUpload({ rawDataUrl, croppedDataUrl, onFileSelected
       </div>
       <div>
         <p className="font-bold text-slate-800 text-sm">Click to upload your photo</p>
-        <p className="text-xs text-slate-400 mt-0.5">PNG, JPG or WEBP · a crop tool will open</p>
+        <p className="text-xs text-slate-400 mt-0.5">Camera or gallery · PNG, JPG, WEBP</p>
       </div>
-      <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleChange} />
     </div>
   );
 }

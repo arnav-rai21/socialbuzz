@@ -1,4 +1,5 @@
 import { sql, ensureTables } from './_db.js';
+import { handleCors } from './_cors.js';
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@socialbuzz.app';
 
@@ -19,6 +20,7 @@ async function getPendingRequests() {
 }
 
 export default async function handler(req, res) {
+  if (handleCors(req, res)) return;
   try {
     await ensureTables();
 

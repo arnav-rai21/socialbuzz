@@ -1,41 +1,87 @@
 import { sql, ensureTables } from './_db.js';
+import { handleCors } from './_cors.js';
 
 const ADMIN_EMAIL  = process.env.ADMIN_EMAIL  || 'admin@socialbuzz.app';
 const APP_BASE_URL = process.env.APP_BASE_URL || 'https://socialbuzz.vercel.app';
 const DEFAULT_SLOT = { x: 880, y: 640, width: 520, height: 520, radius: 32 };
 const EMPTY_TEMPLATE = {
   hasTemplate: false, templateName: '', templateDataUrl: '',
-  imageSlot: DEFAULT_SLOT, updatedAt: '', fontSettings: null, sharingSettings: null,
+  imageSlot: DEFAULT_SLOT, updatedAt: '', fontSettings: null,
 };
 
-async function loadTemplateConfig(slug) {
-  const { rows } = await sql`SELECT * FROM events_config WHERE slug = ${slug}`;
-  const stored = rows[0];
-  if (!stored || !stored.cloudinary_url) return EMPTY_TEMPLATE;
-  try {
-    const resp = await fetch(stored.cloudinary_url);
-    if (!resp.ok) return EMPTY_TEMPLATE;
-    const buf = await resp.arrayBuffer();
-    const ct  = (resp.headers.get('content-type') || 'image/png').split(';')[0];
-    const b64 = Buffer.from(buf).toString('base64');
-    const result = {
-      hasTemplate:     true,
-      templateName:    stored.template_name || '',
-      templateDataUrl: `data:${ct};base64,${b64}`,
-      imageSlot:       stored.image_slot || DEFAULT_SLOT,
-      updatedAt:       stored.updated_at  || '',
-    };
-    if (stored.text_slot)        result.textSlot        = stored.text_slot;
-    if (stored.font_settings)    result.fontSettings    = stored.font_settings;
-    if (stored.sharing_settings) result.sharingSettings = stored.sharing_settings;
-    if (stored.field_settings)   result.fieldSettings   = stored.field_settings;
-    return result;
-  } catch {
-    return EMPTY_TEMPLATE;
+// Fetch a stored image URL and inline it as a base64 data URL the canvas can draw.
+async function urlToDataUrl(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) return null;
+  const buf = await resp.arrayBuffer();
+  const ct  = (resp.headers.get('content-type') || 'image/png').split(';')[0];
+  return `data:${ct};base64,${Buffer.from(buf).toString('base64')}`;
+}
+
+function rowToTemplate(row, dataUrl) {
+  const cfg = {
+    id:              row.id,
+    hasTemplate:     true,
+    templateName:    row.template_name || '',
+    templateDataUrl: dataUrl,
+    imageSlot:       row.image_slot || DEFAULT_SLOT,
+    isDefault:       !!row.is_default,
+    position:        row.position ?? 0,
+    updatedAt:       row.updated_at || '',
+  };
+  if (row.text_slot)     cfg.textSlot     = row.text_slot;
+  if (row.font_settings) cfg.fontSettings = row.font_settings;
+  return cfg;
+}
+
+// Returns { templates: TemplateConfig[], sharingSettings, fieldSettings }.
+async function loadEventData(slug) {
+  const { rows } = await sql`SELECT * FROM event_templates WHERE slug = ${slug} ORDER BY position, id`;
+
+  const templates = [];
+  for (const row of rows) {
+    if (!row.image_url) continue;
+    try {
+      const dataUrl = await urlToDataUrl(row.image_url);
+      if (dataUrl) templates.push(rowToTemplate(row, dataUrl));
+    } catch { /* skip unreachable image */ }
   }
+
+  // Event-level settings shared across templates.
+  let sharingSettings = null, fieldSettings = null;
+  const { rows: cfgRows } = await sql`SELECT * FROM events_config WHERE slug = ${slug}`;
+  const cfg = cfgRows[0];
+  if (cfg) {
+    sharingSettings = cfg.sharing_settings || null;
+    fieldSettings   = cfg.field_settings   || null;
+  }
+
+  // Safety net: if no rows came from event_templates yet (e.g. the migration
+  // hasn't run, or its image fetch failed) but a legacy single template exists
+  // in events_config, surface it so existing templates are never lost on deploy.
+  if (templates.length === 0 && cfg && cfg.cloudinary_url) {
+    try {
+      const dataUrl = await urlToDataUrl(cfg.cloudinary_url);
+      if (dataUrl) {
+        templates.push(rowToTemplate({
+          id:            undefined,           // legacy row has no event_templates id
+          template_name: cfg.template_name,
+          image_slot:    cfg.image_slot,
+          text_slot:     cfg.text_slot,
+          font_settings: cfg.font_settings,
+          is_default:    true,
+          position:      0,
+          updated_at:    cfg.updated_at,
+        }, dataUrl));
+      }
+    } catch { /* legacy image unreachable — leave templates empty */ }
+  }
+
+  return { templates, sharingSettings, fieldSettings };
 }
 
 export default async function handler(req, res) {
+  if (handleCors(req, res)) return;
   if (req.method !== 'GET') return res.status(405).json({ success: false, error: 'Method not allowed' });
 
   try {
@@ -43,8 +89,14 @@ export default async function handler(req, res) {
     const eventSlug = req.query.event || 'default';
     const mode      = req.query.mode  || '';
 
-    const templateConfig    = await loadTemplateConfig(eventSlug);
+    const { templates, sharingSettings, fieldSettings } = await loadEventData(eventSlug);
+    const defaultTemplate = templates.find(t => t.isDefault) || templates[0] || EMPTY_TEMPLATE;
     const LINKEDIN_REDIRECT = process.env.LINKEDIN_REDIRECT_URI || `${APP_BASE_URL}/api/linkedin-callback`;
+
+    // Back-compat single template: attach event-level settings onto it for old clients.
+    const templateConfig = { ...defaultTemplate };
+    if (sharingSettings) templateConfig.sharingSettings = sharingSettings;
+    if (fieldSettings)   templateConfig.fieldSettings   = fieldSettings;
 
     const data = {
       userEmail:           '',
@@ -52,7 +104,10 @@ export default async function handler(req, res) {
       isAuthorized:        true,
       eventSlug,
       mode,
-      templateConfig,
+      templateConfig,                 // default/first template (widget + back-compat)
+      templates,                      // all enabled templates for the event
+      sharingSettings,                // event-level
+      fieldSettings,                  // event-level
       linkedInRedirectUri: LINKEDIN_REDIRECT,
       googleClientId:      process.env.GOOGLE_CLIENT_ID    || '',
       googleRedirectUri:   process.env.GOOGLE_REDIRECT_URI || `${APP_BASE_URL}/api/google-callback`,

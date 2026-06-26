@@ -49,6 +49,8 @@ export function loadBootstrap(): TemplateConfig {
 
 const ACTION_ROUTES: Record<string, string> = {
   saveTemplate:          '/api/template',
+  deleteTemplate:        '/api/template',
+  cutout:                '/api/upload',
   uploadImage:           '/api/upload',
   logShare:              '/api/log-share',
   getEventsList:         '/api/events',
@@ -73,21 +75,30 @@ async function callApi<T>(body: Record<string, unknown>): Promise<T> {
   const endpoint = ACTION_ROUTES[action];
   if (!endpoint) throw new Error(`Unknown action: ${action}`);
 
-  let res: Response;
+  // One AbortController covers BOTH the fetch AND res.text() body read.
+  // Previously clearTimeout fired after headers arrived, leaving the body read
+  // with no timeout — causing an infinite hang when the server stalled mid-response.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20_000);
+
+  let text: string;
   try {
-    res = await fetch(endpoint, {
+    const res = await fetch(endpoint, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(body),
+      signal:  controller.signal,
     });
+    text = await res.text();
   } catch {
     throw new Error('API_UNAVAILABLE');
+  } finally {
+    clearTimeout(timer); // cleared only after both fetch + body read complete
   }
 
-  const text = await res.text();
   if (!text.trimStart().startsWith('{')) throw new Error('API_UNAVAILABLE');
   const json = JSON.parse(text) as { success: boolean; data?: T; error?: string };
-  if (!json.success) throw new Error(json.error || 'API call failed');
+  if (!json.success) throw new Error(typeof json.error === 'string' ? json.error : 'API call failed');
   return json.data as T;
 }
 
@@ -95,6 +106,9 @@ async function callApi<T>(body: Record<string, unknown>): Promise<T> {
 
 export async function loadBootstrapAsync(eventSlug: string): Promise<{
   templateConfig:      TemplateConfig;
+  templates?:          TemplateConfig[];
+  sharingSettings?:    SharingSettings | null;
+  fieldSettings?:      import('../types').FieldSettings | null;
   adminEmail:          string;
   eventsList?:         import('../types').EventMeta[];
   linkedInRedirectUri?: string;
@@ -116,6 +130,7 @@ export async function loadBootstrapAsync(eventSlug: string): Promise<{
 // ── Template save ─────────────────────────────────────────────────────────────
 
 export interface SaveTemplatePayload {
+  templateId?:      number;      // omit to create a new template; set to update
   fileName:         string;
   templateDataUrl:  string;
   imageSlot:        ImageSlot;
@@ -135,6 +150,42 @@ export function callSaveTemplate(
     .then(onSuccess)
     .catch(onFailure);
 }
+
+export function callDeleteTemplate(
+  eventSlug:  string,
+  templateId: number,
+  onSuccess:  (result: { success: boolean }) => void,
+  onFailure:  (err: Error | string) => void
+): void {
+  callApi<{ success: boolean }>({ action: 'deleteTemplate', eventSlug, templateId })
+    .then(onSuccess)
+    .catch(onFailure);
+}
+
+// ── Cutout.Pro image processing (background removal / enhancement) ───────────
+
+export function callCutout(
+  base64Data: string,
+  op:         'removeBg' | 'enhance',
+  onSuccess:  (result: { base64Data: string }) => void,
+  onFailure:  (err: Error | string) => void
+): void {
+  callApi<{ base64Data: string }>({ action: 'cutout', base64Data, op })
+    .then(onSuccess)
+    .catch(onFailure);
+}
+
+export const callRemoveBackground = (
+  base64Data: string,
+  onSuccess:  (result: { base64Data: string }) => void,
+  onFailure:  (err: Error | string) => void
+) => callCutout(base64Data, 'removeBg', onSuccess, onFailure);
+
+export const callEnhanceImage = (
+  base64Data: string,
+  onSuccess:  (result: { base64Data: string }) => void,
+  onFailure:  (err: Error | string) => void
+) => callCutout(base64Data, 'enhance', onSuccess, onFailure);
 
 // ── Image upload ───────────────────────────────────────────────────────────────
 

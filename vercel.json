@@ -1,6 +1,17 @@
 {
   "outputDirectory": "dist",
+  "functions": {
+    "api/upload.js": { "maxDuration": 30 }
+  },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/app.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Content-Security-Policy", "value": "frame-ancestors *" }
+      ]
+    }
   ]
 }
