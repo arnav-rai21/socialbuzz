@@ -17,6 +17,8 @@ type Phase =
 interface AdminLoginProps {
   onAuthenticated: (email: string, name: string) => void;
   onClose:         () => void;
+  /** Open the Google sign-in popup immediately on mount (one-click from homepage). */
+  autoStart?:      boolean;
 }
 
 // ── Google G SVG ──────────────────────────────────────────────────────────────
@@ -54,15 +56,16 @@ function buildOAuthUrl(state: string): string {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function AdminLogin({ onAuthenticated, onClose }: AdminLoginProps) {
+export default function AdminLogin({ onAuthenticated, onClose, autoStart }: AdminLoginProps) {
   const [phase,         setPhase]         = useState<Phase>('idle');
   const [errorMsg,      setErrorMsg]      = useState('');
   const [pendingEmail,  setPendingEmail]  = useState('');
   const [pendingName,   setPendingName]   = useState('');
 
-  const stateRef   = useRef<string>('');
-  const pollRef    = useRef<ReturnType<typeof setInterval> | null>(null);
-  const popupRef   = useRef<Window | null>(null);
+  const stateRef       = useRef<string>('');
+  const pollRef        = useRef<ReturnType<typeof setInterval> | null>(null);
+  const popupRef       = useRef<Window | null>(null);
+  const autoStartedRef = useRef(false);
 
   // ── Cleanup on unmount ────────────────────────────────────────────────────
 
@@ -100,6 +103,16 @@ export default function AdminLogin({ onAuthenticated, onClose }: AdminLoginProps
 
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Auto-open the Google popup on mount (one-click sign-in from homepage) ────
+
+  useEffect(() => {
+    if (autoStart && !autoStartedRef.current) {
+      autoStartedRef.current = true;
+      openGooglePopup();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

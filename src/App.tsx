@@ -22,7 +22,6 @@ import { toast } from 'sonner';
 
 import AdminLogin from './components/AdminLogin';
 import AdminPanel from './components/AdminPanel';
-import LandingPage from './components/LandingPage';
 import MarketingPage from './components/MarketingPage';
 import CanvasPreview from './components/CanvasPreview';
 import CropModal from './components/CropModal';
@@ -103,9 +102,6 @@ export default function App() {
   const [showLanding, setShowLanding] = useState(
     !_savedAuth && INITIAL_EVENT_SLUG === 'default'
   );
-  // Within the landing flow, show the marketing homepage first; the login step
-  // (LandingPage) is reached via its CTA. Reset to true on logout.
-  const [showMarketing, setShowMarketing] = useState(true);
 
   // ── Multi-event state ─────────────────────────────────────────────────────
   const [eventSlug, setEventSlug] = useState(INITIAL_EVENT_SLUG);
@@ -209,7 +205,6 @@ export default function App() {
     setIsAdminOpen(false);
     setAppMode('app');
     setShowLanding(true);
-    setShowMarketing(true);
   }
 
   // ── Template ──────────────────────────────────────────────────────────────
@@ -484,14 +479,22 @@ export default function App() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  // Marketing homepage — shown first on root URL when not authenticated
-  if (showLanding && showMarketing) {
-    return <MarketingPage onGetStarted={() => setShowMarketing(false)} />;
-  }
-
-  // Login step — Google sign-in, reached from the marketing page's CTA
+  // Marketing homepage — shown on root URL when not authenticated.
+  // Its CTAs open the Google sign-in popup directly (one click), with
+  // AdminLogin's popup-blocked fallback as a safety net.
   if (showLanding) {
-    return <LandingPage onAuthenticated={handleAuthenticated} onBack={() => setShowMarketing(true)} />;
+    return (
+      <>
+        <MarketingPage onGetStarted={() => setShowAdminLogin(true)} />
+        {showAdminLogin && (
+          <AdminLogin
+            autoStart
+            onAuthenticated={handleAuthenticated}
+            onClose={() => setShowAdminLogin(false)}
+          />
+        )}
+      </>
+    );
   }
 
   // Admin dashboard mode — full-screen dashboard for event management
