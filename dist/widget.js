@@ -11,6 +11,14 @@
   var SIDE = position === 'left' ? 'left' : 'right';
   var Z    = 2147483647;
 
+  /* CTA button colour — data-color (solid) and optional data-color2 (gradient). */
+  var color1 = (script && script.getAttribute('data-color'))  || '';
+  var color2 = (script && script.getAttribute('data-color2')) || '';
+  function _validHex(c) { return /^#[0-9a-fA-F]{3,8}$/.test(c); }
+  var CTA_BG = (_validHex(color1) && _validHex(color2))
+    ? 'linear-gradient(135deg,' + color1 + ' 0%,' + color2 + ' 100%)'
+    : (_validHex(color1) ? color1 : 'linear-gradient(135deg,#7c3aed 0%,#db2777 100%)');
+
   /* ── Icons ───────────────────────────────────────────────────── */
   var FAB_ICON_HTML =
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"' +
@@ -57,7 +65,7 @@
     '#_etbw_btn{' +
       'position:fixed;bottom:24px;' + SIDE + ':24px;' +
       'height:48px;border-radius:50px;' +
-      'background:linear-gradient(135deg,#7c3aed 0%,#db2777 100%);' +
+      'background:' + CTA_BG + ';' +
       'border:none;outline:none;cursor:pointer;padding:0 20px 0 16px;margin:0;' +
       'box-shadow:0 4px 20px rgba(109,40,217,.45);-webkit-appearance:none;appearance:none;' +
       'z-index:' + Z + ';' +
@@ -302,6 +310,8 @@
   var isHelpOpen = false;
 
   function openPanel() {
+    // Visit tracking is handled inside the loaded app (it carries the stable
+    // visitor id and reports source='widget' when running in this iframe).
     if (!loaded) {
       iframe.src = baseUrl + '/?event=' + encodeURIComponent(slug);
       loaded = true;
