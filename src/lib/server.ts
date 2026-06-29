@@ -9,7 +9,7 @@ import type {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-export const IS_GAS: boolean = false;
+export const IS_GAS: boolean = false; // Always Vercel — GAS removed
 
 const _env = (import.meta as any).env ?? {};
 export const ADMIN_EMAIL:          string = '';
@@ -33,6 +33,21 @@ export const INITIAL_MODE: string =
 
 export const DEFAULT_SLOT: ImageSlot = { x: 880, y: 640, width: 520, height: 520, radius: 32 };
 
+// Stable per-browser visitor id (created on first visit) used to stitch together a
+// single person's journey across Visited / Generated / Shared events.
+export function getVisitorId(): string {
+  try {
+    let id = localStorage.getItem('socialbuzz_visitor_id');
+    if (!id) {
+      id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      localStorage.setItem('socialbuzz_visitor_id', id);
+    }
+    return id;
+  } catch { return ''; }
+}
+
 export const DEFAULT_TEMPLATE_CONFIG: TemplateConfig = {
   hasTemplate:     false,
   templateName:    '',
@@ -43,6 +58,32 @@ export const DEFAULT_TEMPLATE_CONFIG: TemplateConfig = {
 /** Synchronous load — always returns empty config since bootstrap is async on Vercel. */
 export function loadBootstrap(): TemplateConfig {
   return { ...DEFAULT_TEMPLATE_CONFIG, imageSlot: { ...DEFAULT_SLOT } };
+}
+
+// ── Widget embed snippet ──────────────────────────────────────────────────────
+
+export interface WidgetSnippetOpts {
+  slug:      string;
+  position:  'right' | 'left';
+  colorStyle: 'solid' | 'gradient';
+  color1:    string;
+  color2:    string;
+  origin?:   string;
+}
+
+/** Build the `<script>` embed snippet for the floating widget (shared by all embed UIs). */
+export function buildWidgetSnippet(o: WidgetSnippetOpts): string {
+  const origin = o.origin ?? (typeof window !== 'undefined' ? window.location.origin : '');
+  const lines = [
+    '<script',
+    `  src="${origin}/widget.js"`,
+    `  data-event="${o.slug}"`,
+    `  data-position="${o.position}"`,
+    `  data-color="${o.color1}"`,
+  ];
+  if (o.colorStyle === 'gradient') lines.push(`  data-color2="${o.color2}"`);
+  lines.push('  async>', '<\/script>');
+  return lines.join('\n');
 }
 
 // ── Route map: action → API endpoint ─────────────────────────────────────────
@@ -56,6 +97,7 @@ const ACTION_ROUTES: Record<string, string> = {
   getEventsList:         '/api/events',
   createEvent:           '/api/events',
   deleteEvent:           '/api/events',
+  deleteActivity:        '/api/events',
   getEventStats:         '/api/stats',
   getLinkedInAuthUrl:    '/api/linkedin',
   postToLinkedIn:        '/api/linkedin',
@@ -195,7 +237,7 @@ export function callUploadImage(
   onSuccess:  (asset: GeneratedAsset) => void,
   onFailure:  (err: Error | string) => void
 ): void {
-  callApi<GeneratedAsset>({ action: 'uploadImage', base64Data, profile })
+  callApi<GeneratedAsset>({ action: 'uploadImage', base64Data, profile, visitorId: getVisitorId() })
     .then(onSuccess)
     .catch(onFailure);
 }
@@ -214,7 +256,12 @@ export interface ShareEventData {
 }
 
 export function callLogShareEvent(data: ShareEventData): void {
-  callApi({ action: 'logShare', data }).catch(() => {});
+  callApi({ action: 'logShare', data: { ...data, visitorId: getVisitorId() } }).catch(() => {});
+}
+
+// Reach tracking: an event page/widget was opened. `source` = 'widget' | 'direct'.
+export function callLogOpen(eventSlug: string, source: 'widget' | 'direct'): void {
+  callApi({ action: 'logShare', data: { eventSlug, eventType: 'Opened', platform: source, visitorId: getVisitorId() } }).catch(() => {});
 }
 
 // ── Events list ────────────────────────────────────────────────────────────────
@@ -249,6 +296,19 @@ export function callDeleteEvent(
   onFailure: (err: Error | string) => void
 ): void {
   callApi<{ success: boolean }>({ action: 'deleteEvent', slug })
+    .then(onSuccess)
+    .catch(onFailure);
+}
+
+// Delete analytics records: a single visitor's journey (pass visitorId) or all of
+// the event's analytics (omit visitorId). Used to clear out test/junk entries.
+export function callDeleteActivity(
+  slug:      string,
+  visitorId: string | undefined,
+  onSuccess: (result: { success: boolean; deleted: number }) => void,
+  onFailure: (err: Error | string) => void
+): void {
+  callApi<{ success: boolean; deleted: number }>({ action: 'deleteActivity', slug, visitorId })
     .then(onSuccess)
     .catch(onFailure);
 }

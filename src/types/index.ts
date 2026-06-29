@@ -68,6 +68,7 @@ export interface TemplateConfig {
   templateName:     string;
   templateDataUrl:  string;
   imageSlot:        ImageSlot;
+  imageSlotSet?:    boolean;   // client-only: false on a fresh draft until a box is drawn
   textSlot?:        TextSlot;
   isDefault?:       boolean;
   position?:        number;
@@ -112,6 +113,23 @@ export interface EventStats {
   generatesToday?: number;
   generates7d?:    number;
   lastActivity?:   string;
+  totalViews?:     number;   // 'Opened' events (widget + direct)
+  widgetOpens?:    number;
+  pageViews?:      number;
+  conversionRate?: number;   // generates / views, as a percentage
+  uniqueVisitors?: number;   // distinct visitor_id
+  journeys?:       Array<{
+    visitorId: string;
+    name:      string;
+    company:   string;
+    email:     string;
+    visits:    number;
+    generates: number;
+    shares:    number;
+    platforms: string;
+    firstSeen: string;
+    lastSeen:  string;
+  }>;
   topCompanies?:   Array<{ company: string; count: number }>;
   daily?:          Array<{ day: string; generates: number; shares: number }>;
   recentUsers:     Array<{

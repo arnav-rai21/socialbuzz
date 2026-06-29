@@ -31,7 +31,7 @@ import ShareButtons from './components/ShareButtons';
 import TemplateGallery from './components/TemplateGallery';
 import UserForm from './components/UserForm';
 
-import { IS_GAS, IS_GAS_ADMIN, INITIAL_EVENT_SLUG, INITIAL_MODE, DEFAULT_SLOT, callDeleteEvent, callDeleteTemplate, callGetEventStats, callSaveTemplate, callUploadImage, loadBootstrap, loadBootstrapAsync } from './lib/server';
+import { IS_GAS, IS_GAS_ADMIN, INITIAL_EVENT_SLUG, INITIAL_MODE, DEFAULT_SLOT, buildWidgetSnippet, callDeleteActivity, callDeleteEvent, callDeleteTemplate, callGetEventStats, callLogOpen, callSaveTemplate, callUploadImage, loadBootstrap, loadBootstrapAsync } from './lib/server';
 import type { EventMeta, EventStats, FieldSettings, FontSettings, GeneratedAsset, ImageSlot, SharingSettings, TemplateConfig, TextSlot, UserProfile } from './types';
 import { DEFAULT_FIELD_SETTINGS, DEFAULT_FONT_SETTINGS, DEFAULT_SHARING_SETTINGS } from './types';
 
@@ -81,6 +81,9 @@ export default function App() {
   const [editStats,      setEditStats]                 = useState<EventStats | null>(null);
   const [editStatsLoading, setEditStatsLoading]        = useState(false);
   const [embedPosition,  setEmbedPosition]             = useState<'right' | 'left'>('right');
+  const [embedStyle,     setEmbedStyle]                = useState<'solid' | 'gradient'>('gradient');
+  const [embedColor1,    setEmbedColor1]               = useState('#7c3aed');
+  const [embedColor2,    setEmbedColor2]               = useState('#db2777');
   const [confirmDeleteEvent, setConfirmDeleteEvent]    = useState(false);
   const [isDeletingEvent, setIsDeletingEvent]          = useState(false);
   const templateFileInputRef                           = useRef<HTMLInputElement>(null);
@@ -150,6 +153,18 @@ export default function App() {
     // events from the admin dashboard), otherwise the template list stays stale.
   }, [eventSlug]);
 
+  // Reach tracking: log a visit once per mount for real attendee views (not an
+  // admin/editor). Source is inferred from context — inside the widget iframe →
+  // 'widget', a top-level tab → 'direct'. The visitor id (attached in callLogOpen)
+  // stitches this visit to any later Generate/Share into one journey.
+  useEffect(() => {
+    const inIframe = typeof window !== 'undefined' && window.top !== window.self;
+    if (!_savedAuth && INITIAL_MODE !== 'admin') {
+      callLogOpen(INITIAL_EVENT_SLUG, inIframe ? 'widget' : 'direct');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Derived active template ────────────────────────────────────────────────
   const activeTemplate: TemplateConfig =
     templates.find(t => keyOf(t) === activeKey) ?? templates[0] ?? initialTemplate;
@@ -213,7 +228,7 @@ export default function App() {
   function handleTemplateLoad(dataUrl: string, fileName: string) {
     const draft: TemplateConfig = {
       hasTemplate: true, templateName: fileName, templateDataUrl: dataUrl,
-      imageSlot: { ...DEFAULT_SLOT }, fontSettings: DEFAULT_FONT_SETTINGS,
+      imageSlot: { ...DEFAULT_SLOT }, imageSlotSet: false, fontSettings: DEFAULT_FONT_SETTINGS,
     };
     setTemplates(prev => [...prev.filter(t => t.id != null), draft]); // replace any prior draft
     setTemplateUploadDataUrl(dataUrl);
@@ -255,7 +270,13 @@ export default function App() {
   }
 
   function handleSlotChange(slot: ImageSlot) {
-    updateActive({ imageSlot: slot });
+    // Any edit to the photo slot (drawing, dragging, resizing, typing coords) marks it as set.
+    updateActive({ imageSlot: slot, imageSlotSet: true });
+    setGeneratedAsset(null);
+  }
+
+  function handleClearPhotoSlot() {
+    updateActive({ imageSlotSet: false });
     setGeneratedAsset(null);
   }
 
@@ -288,6 +309,7 @@ export default function App() {
     const t = activeTemplate;
     const dataUrl = templateUploadDataUrl || t.templateDataUrl;
     if (!dataUrl) { toast.error('Select a template image first.'); return; }
+    if (t.imageSlotSet === false) { toast.error('Map the photo area first — drag on the preview to draw it.'); return; }
     setIsSavingTemplate(true);
     const prevKey = keyOf(t);
     const payloadTextSlot = t.textSlot; // capture before async
@@ -579,15 +601,19 @@ export default function App() {
           {(() => {
             const eventName = eventsList.find(e => e.slug === eventSlug)?.name || eventSlug;
             const eventUrl  = window.location.origin + window.location.pathname + '?event=' + encodeURIComponent(eventSlug);
-            const widgetSrc = window.location.origin + '/widget.js';
-            const embedCode = `<script\n  src="${widgetSrc}"\n  data-event="${eventSlug}"\n  data-position="${embedPosition}"\n  async>\n<\/script>`;
+            const embedCode = buildWidgetSnippet({ slug: eventSlug, position: embedPosition, colorStyle: embedStyle, color1: embedColor1, color2: embedColor2 });
             return (
               <div className="max-w-5xl mx-auto">
                 {editorSection === 'analytics' && (
                   editStatsLoading
                     ? <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center gap-3 py-20"><Loader size={26} className="animate-spin text-violet-500" /><p className="text-sm text-slate-400 font-medium">Loading analytics…</p></div>
                     : editStats
-                      ? <StatsView slug={eventSlug} stats={editStats} eventName={eventName} embedded />
+                      ? <StatsView slug={eventSlug} stats={editStats} eventName={eventName} embedded
+                          onDeleteActivity={(visitorId) => callDeleteActivity(
+                            eventSlug, visitorId,
+                            (r) => { toast.success(visitorId ? 'Entry deleted.' : `Cleared ${r.deleted} record${r.deleted === 1 ? '' : 's'}.`); loadEditStats(eventSlug); },
+                            (err) => toast.error(`Delete failed: ${(err as Error)?.message ?? err}`),
+                          )} />
                       : <div className="bg-white rounded-2xl border border-slate-200 shadow-sm py-16 text-center"><button onClick={() => loadEditStats(eventSlug)} className="text-sm font-semibold text-violet-600 hover:text-violet-800 cursor-pointer">Load analytics</button></div>
                 )}
 
@@ -630,6 +656,41 @@ export default function App() {
                         ))}
                       </div>
                     </div>
+
+                    {/* Button colour — solid or gradient */}
+                    <div className="flex flex-col gap-2.5">
+                      <p className="text-xs font-semibold text-slate-600">Button colour</p>
+                      <div className="flex gap-2 max-w-xs">
+                        {(['gradient', 'solid'] as const).map(st => (
+                          <button key={st} onClick={() => setEmbedStyle(st)}
+                            className={`flex-1 py-2 rounded-xl text-xs font-semibold border cursor-pointer transition-colors capitalize ${embedStyle === st ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                            {st}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-4 flex-wrap">
+                        <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                          {embedStyle === 'gradient' ? 'Start' : 'Colour'}
+                          <input type="color" value={embedColor1} onChange={e => setEmbedColor1(e.target.value)}
+                            className="w-9 h-9 rounded-lg border border-slate-200 cursor-pointer p-0.5 bg-white" />
+                          <span className="font-mono text-slate-500">{embedColor1}</span>
+                        </label>
+                        {embedStyle === 'gradient' && (
+                          <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                            End
+                            <input type="color" value={embedColor2} onChange={e => setEmbedColor2(e.target.value)}
+                              className="w-9 h-9 rounded-lg border border-slate-200 cursor-pointer p-0.5 bg-white" />
+                            <span className="font-mono text-slate-500">{embedColor2}</span>
+                          </label>
+                        )}
+                      </div>
+                      {/* Live preview */}
+                      <div className="flex items-center gap-2 px-4 h-12 self-start rounded-full text-white text-sm font-bold shadow"
+                        style={{ background: embedStyle === 'gradient' ? `linear-gradient(135deg, ${embedColor1} 0%, ${embedColor2} 100%)` : embedColor1 }}>
+                        <Sparkles size={15} /> Start Social Buzz
+                      </div>
+                    </div>
+
                     <div className="bg-slate-900 rounded-xl overflow-hidden">
                       <pre className="text-xs text-emerald-400 font-mono px-4 py-4 overflow-x-auto leading-relaxed whitespace-pre">{embedCode}</pre>
                     </div>
@@ -715,6 +776,7 @@ export default function App() {
           <div className="flex-1 bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm min-h-0 flex items-center justify-center">
             <CanvasPreview
               templateConfig={activeTemplate}
+              imageSlotSet={activeTemplate.imageSlotSet}
               userCroppedDataUrl={userCroppedDataUrl}
               profile={profile}
               fontSettings={activeFont}
@@ -722,6 +784,7 @@ export default function App() {
               isTextMappingMode={isTextMappingMode && isAdminActive}
               showSlotIndicators={isAdminActive}
               onSlotChange={handleSlotChange}
+              onClearPhotoSlot={handleClearPhotoSlot}
               onTextSlotChange={handleTextSlotChange}
               onCanvasDataUrl={handleCanvasDataUrl}
             />
@@ -802,6 +865,7 @@ export default function App() {
                         <AdminPanel
                           open={true}
                           templateConfig={activeTemplate}
+                          imageSlotSet={activeTemplate.imageSlotSet}
                           templates={templates}
                           activeKey={activeKey}
                           isMappingMode={isMappingMode}

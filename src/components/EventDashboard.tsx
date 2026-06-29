@@ -4,9 +4,12 @@ import {
   BarChart2,
   Building2,
   CalendarDays,
+  CheckCircle,
   Clock,
   Code2,
+  Download,
   ExternalLink,
+  Eye,
   Image as ImageIcon,
   Loader,
   Link2,
@@ -14,6 +17,7 @@ import {
   Percent,
   Plus,
   Share2,
+  Target,
   ShieldOff,
   Trash2,
   TrendingUp,
@@ -25,6 +29,7 @@ import {
 import { toast } from 'sonner';
 
 import {
+  buildWidgetSnippet,
   callGetEventsList,
   callCreateEvent,
   callDeleteEvent,
@@ -40,12 +45,12 @@ import type { EventMeta, EventStats } from '../types';
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface EventDashboardProps {
-  eventsList: EventMeta[];
-  adminEmail: string;
-  adminName?: string;
+  eventsList:  EventMeta[];
+  adminEmail:  string;
+  adminName?:  string;
   onEditEvent: (slug: string) => void;
-  onClose: () => void;
-  onLogout: () => void;
+  onClose:     () => void;
+  onLogout:    () => void;
 }
 
 // ── Promise wrappers (server functions use callback pattern) ──────────────────
@@ -54,7 +59,7 @@ function getEventsList(): Promise<EventMeta[]> {
   return new Promise((resolve, reject) => {
     callGetEventsList(
       result => resolve(result.events ?? []),
-      err => reject(typeof err === 'string' ? new Error(err) : err),
+      err    => reject(typeof err === 'string' ? new Error(err) : err),
     );
   });
 }
@@ -65,7 +70,7 @@ function createEvent(slug: string, name: string): Promise<{ success: boolean; sl
       slug,
       name,
       result => resolve(result),
-      err => reject(typeof err === 'string' ? new Error(err) : err),
+      err    => reject(typeof err === 'string' ? new Error(err) : err),
     );
   });
 }
@@ -75,7 +80,7 @@ function deleteEvent(slug: string): Promise<{ success: boolean }> {
     callDeleteEvent(
       slug,
       result => resolve(result),
-      err => reject(typeof err === 'string' ? new Error(err) : err),
+      err    => reject(typeof err === 'string' ? new Error(err) : err),
     );
   });
 }
@@ -85,7 +90,7 @@ function getEventStats(slug: string): Promise<EventStats> {
     callGetEventStats(
       slug,
       stats => resolve(stats),
-      err => reject(typeof err === 'string' ? new Error(err) : err),
+      err   => reject(typeof err === 'string' ? new Error(err) : err),
     );
   });
 }
@@ -95,7 +100,7 @@ function getPendingRequests(adminEmail: string): Promise<{ requests: AccessReque
     callGetPendingRequests(
       adminEmail,
       result => resolve(result),
-      err => reject(typeof err === 'string' ? new Error(err) : err),
+      err    => reject(typeof err === 'string' ? new Error(err) : err),
     );
   });
 }
@@ -106,7 +111,7 @@ function approveRequest(email: string, adminEmail: string): Promise<{ success: b
       email,
       adminEmail,
       result => resolve(result),
-      err => reject(typeof err === 'string' ? new Error(err) : err),
+      err    => reject(typeof err === 'string' ? new Error(err) : err),
     );
   });
 }
@@ -117,7 +122,7 @@ function denyRequest(email: string, adminEmail: string): Promise<{ success: bool
       email,
       adminEmail,
       result => resolve(result),
-      err => reject(typeof err === 'string' ? new Error(err) : err),
+      err    => reject(typeof err === 'string' ? new Error(err) : err),
     );
   });
 }
@@ -128,7 +133,7 @@ function revokeAccess(email: string, adminEmail: string): Promise<{ success: boo
       email,
       adminEmail,
       result => resolve(result),
-      err => reject(typeof err === 'string' ? new Error(err) : err),
+      err    => reject(typeof err === 'string' ? new Error(err) : err),
     );
   });
 }
@@ -149,10 +154,10 @@ const SLUG_RE = /^[a-z0-9-]+$/;
 function formatTs(ts: string): string {
   try {
     return new Date(ts).toLocaleString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
+      day:    '2-digit',
+      month:  'short',
+      year:   'numeric',
+      hour:   '2-digit',
       minute: '2-digit',
     });
   } catch {
@@ -174,7 +179,7 @@ const TINTS: Record<string, { chip: string; icon: string }> = {
 function KpiCard({
   icon, label, value, sub, tint = 'violet',
 }: {
-  icon: ReactNode;
+  icon:  ReactNode;
   label: string;
   value: number | string;
   sub?:  string;
@@ -241,18 +246,21 @@ function TrendChart({ daily }: { daily: EventStats['daily'] }) {
 // ── Stats View ────────────────────────────────────────────────────────────────
 
 export function StatsView({
+  slug,
   stats,
   eventName,
   onBack,
   embedded = false,
+  onDeleteActivity,
 }: {
   slug:       string;
   stats:      EventStats;
   eventName:  string;
   onBack?:    () => void;
   embedded?:  boolean;
+  onDeleteActivity?: (visitorId?: string) => void;
 }) {
-  const platforms = stats.byPlatform ?? {};
+  const platforms       = stats.byPlatform ?? {};
   const platformEntries = Object.entries(platforms).sort((a, b) => b[1] - a[1]);
   const maxPlatformCount = platformEntries.length > 0 ? platformEntries[0][1] : 1;
   const recentActivity   = stats.recentUsers ?? [];
@@ -300,8 +308,10 @@ export function StatsView({
       ) : (
         <>
           {/* KPI grid */}
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+            <KpiCard tint="sky"     icon={<Eye size={18} />}          label="Views"            value={stats.totalViews ?? 0} sub={`${stats.widgetOpens ?? 0} widget · ${stats.pageViews ?? 0} direct`} />
             <KpiCard tint="violet"  icon={<TrendingUp size={18} />}   label="Total Generates"  value={stats.totalGenerates ?? 0} />
+            <KpiCard tint="emerald" icon={<Target size={18} />}       label="Conversion"       value={`${stats.conversionRate ?? 0}%`} sub="generates per view" />
             <KpiCard tint="pink"    icon={<Share2 size={18} />}       label="Total Shares"     value={stats.totalShares ?? 0} />
             <KpiCard tint="emerald" icon={<Percent size={18} />}      label="Share Rate"       value={`${stats.shareRate ?? 0}%`} sub="shares per generate" />
             <KpiCard tint="sky"     icon={<Users size={18} />}        label="Unique Attendees" value={stats.uniqueUsers ?? 0} sub="by email" />
@@ -416,6 +426,99 @@ export function StatsView({
               </div>
             )}
           </div>
+
+          {/* User Journeys report */}
+          {(() => {
+            const journeys = stats.journeys ?? [];
+            const csvUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/stats?slug=${encodeURIComponent(slug)}&format=csv`;
+            return (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">
+                    User Journeys
+                    <span className="ml-2 font-semibold text-slate-400 normal-case tracking-normal">{stats.uniqueVisitors ?? journeys.length} unique visitors</span>
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    {onDeleteActivity && journeys.length > 0 && (
+                      <button
+                        onClick={() => { if (window.confirm(`Delete ALL analytics for "${eventName}"? This removes every visit/generate/share record and cannot be undone.`)) onDeleteActivity(); }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-red-100 text-red-500 text-xs font-bold hover:bg-red-50 cursor-pointer transition-colors active:scale-95"
+                        title="Delete all analytics for this event"
+                      >
+                        <Trash2 size={13} /> Clear all
+                      </button>
+                    )}
+                    <a
+                      href={csvUrl}
+                      download
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-violet-200 text-violet-600 text-xs font-bold hover:bg-violet-50 cursor-pointer transition-colors active:scale-95"
+                    >
+                      <Download size={13} /> Download CSV
+                    </a>
+                  </div>
+                </div>
+
+                {journeys.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center gap-2 py-12 text-slate-400">
+                    <Users size={32} className="opacity-30" />
+                    <p className="text-sm font-medium">No visitor data yet</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm min-w-[640px]">
+                      <thead>
+                        <tr className="bg-slate-50 text-left">
+                          <th className="px-4 py-3 text-xs font-bold text-slate-500">Visitor</th>
+                          <th className="px-4 py-3 text-xs font-bold text-slate-500 text-center">Visits</th>
+                          <th className="px-4 py-3 text-xs font-bold text-slate-500 text-center">Generated</th>
+                          <th className="px-4 py-3 text-xs font-bold text-slate-500">Shared</th>
+                          <th className="px-4 py-3 text-xs font-bold text-slate-500 text-right">Last seen</th>
+                          {onDeleteActivity && <th className="px-4 py-3 text-xs font-bold text-slate-500 w-10"></th>}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {journeys.map((j) => {
+                          const label = j.name || `Anonymous · ${j.visitorId.slice(0, 6)}`;
+                          const sub    = j.company || j.email;
+                          return (
+                            <tr key={j.visitorId} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-4 py-3 min-w-0">
+                                <p className="text-slate-900 font-semibold truncate max-w-[220px]">{label}</p>
+                                {sub && <p className="text-[11px] text-slate-400 truncate max-w-[220px]">{sub}</p>}
+                              </td>
+                              <td className="px-4 py-3 text-center font-semibold text-slate-700 tabular-nums">{j.visits}</td>
+                              <td className="px-4 py-3 text-center">
+                                {j.generates > 0
+                                  ? <span className="inline-flex items-center gap-1 text-violet-700 font-semibold"><CheckCircle size={13} />{j.generates > 1 ? ` ×${j.generates}` : ''}</span>
+                                  : <span className="text-slate-300">—</span>}
+                              </td>
+                              <td className="px-4 py-3">
+                                {j.shares > 0
+                                  ? <span className="text-emerald-700 font-semibold">{j.shares}{j.platforms ? ` · ${j.platforms}` : ''}</span>
+                                  : <span className="text-slate-300">—</span>}
+                              </td>
+                              <td className="px-4 py-3 text-slate-400 text-xs text-right whitespace-nowrap">{formatTs(j.lastSeen)}</td>
+                              {onDeleteActivity && (
+                                <td className="px-4 py-3 text-right">
+                                  <button
+                                    onClick={() => { if (window.confirm(`Delete this visitor's records (${label})?`)) onDeleteActivity(j.visitorId); }}
+                                    className="w-7 h-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 cursor-pointer transition-colors"
+                                    title="Delete this entry"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </>
       )}
     </div>
@@ -444,13 +547,16 @@ export default function EventDashboard({
   const [isDeleting,      setIsDeleting]      = useState<string | null>(null);
 
   // Access management
-  const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
-  const [approvedAdmins, setApprovedAdmins] = useState<string[]>([]);
+  const [accessRequests,  setAccessRequests]  = useState<AccessRequest[]>([]);
+  const [approvedAdmins,  setApprovedAdmins]  = useState<string[]>([]);
   const [isLoadingAccess, setIsLoadingAccess] = useState(false);
   const [accessActionBusy, setAccessActionBusy] = useState<string | null>(null);
   const [confirmDeleteSlug, setConfirmDeleteSlug] = useState<string | null>(null);
   const [embedSlug,         setEmbedSlug]         = useState<string | null>(null);
   const [embedPosition,     setEmbedPosition]     = useState<'right' | 'left'>('right');
+  const [embedStyle,        setEmbedStyle]        = useState<'solid' | 'gradient'>('gradient');
+  const [embedColor1,       setEmbedColor1]       = useState('#7c3aed');
+  const [embedColor2,       setEmbedColor2]       = useState('#db2777');
 
   // ── Mount: refresh list + access requests ─────────────────────────────────
 
@@ -463,7 +569,7 @@ export default function EventDashboard({
       setIsLoadingAccess(true);
       getPendingRequests(adminEmail)
         .then(r => { setAccessRequests(r.requests); setApprovedAdmins(r.approvedAdmins); })
-        .catch(() => { })
+        .catch(() => {})
         .finally(() => setIsLoadingAccess(false));
     }
   }, [adminEmail]);
@@ -610,7 +716,7 @@ export default function EventDashboard({
             {/* Logo icon */}
             <div className="w-8 h-8 rounded-lg bg-white/15 border border-white/20 flex items-center justify-center flex-shrink-0">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z" />
+                <path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z"/>
               </svg>
             </div>
             <div className="min-w-0">
@@ -648,7 +754,7 @@ export default function EventDashboard({
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 border border-white/15 text-white/80 text-[11px] font-semibold hover:bg-red-500/25 hover:border-red-400/40 hover:text-white cursor-pointer transition-all active:scale-95"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
               </svg>
               <span className="hidden sm:inline">Logout</span>
             </button>
@@ -860,9 +966,7 @@ export default function EventDashboard({
 
       {/* ── Embed widget modal ── */}
       {embedSlug && (() => {
-        const widgetSrc  = window.location.origin + '/widget.js';
-        const embedCode  =
-          `<script\n  src="${widgetSrc}"\n  data-event="${embedSlug}"\n  data-position="${embedPosition}"\n  async>\n<\/script>`;
+        const embedCode = buildWidgetSnippet({ slug: embedSlug, position: embedPosition, colorStyle: embedStyle, color1: embedColor1, color2: embedColor2 });
         return (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -907,6 +1011,37 @@ export default function EventDashboard({
                       Bottom {pos.charAt(0).toUpperCase() + pos.slice(1)}
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/* Button colour — solid or gradient */}
+              <div className="flex flex-col gap-2.5">
+                <p className="text-xs font-semibold text-slate-600">Button colour</p>
+                <div className="flex gap-2">
+                  {(['gradient', 'solid'] as const).map(st => (
+                    <button key={st} onClick={() => setEmbedStyle(st)}
+                      className={`flex-1 py-2 rounded-xl text-xs font-semibold border cursor-pointer transition-colors capitalize ${embedStyle === st ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                      {st}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-4 flex-wrap">
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                    {embedStyle === 'gradient' ? 'Start' : 'Colour'}
+                    <input type="color" value={embedColor1} onChange={e => setEmbedColor1(e.target.value)}
+                      className="w-9 h-9 rounded-lg border border-slate-200 cursor-pointer p-0.5 bg-white" />
+                  </label>
+                  {embedStyle === 'gradient' && (
+                    <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                      End
+                      <input type="color" value={embedColor2} onChange={e => setEmbedColor2(e.target.value)}
+                        className="w-9 h-9 rounded-lg border border-slate-200 cursor-pointer p-0.5 bg-white" />
+                    </label>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 px-4 h-11 self-start rounded-full text-white text-sm font-bold shadow"
+                  style={{ background: embedStyle === 'gradient' ? `linear-gradient(135deg, ${embedColor1} 0%, ${embedColor2} 100%)` : embedColor1 }}>
+                  <Share2 size={14} /> Start Social Buzz
                 </div>
               </div>
 

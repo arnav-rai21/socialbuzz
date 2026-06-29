@@ -33,6 +33,21 @@ async function deleteEvent(slug) {
   return { success: true };
 }
 
+// Delete analytics records (test/junk data). With a visitorId, removes that one
+// visitor's journey for the event; without it, clears ALL analytics for the event.
+async function deleteActivity(slug, visitorId) {
+  if (!slug) throw new Error('slug is required');
+  let deleted = 0;
+  if (visitorId) {
+    const r = await sql`DELETE FROM activity_log WHERE event_slug = ${slug} AND visitor_id = ${visitorId}`;
+    deleted = r.rowCount || 0;
+  } else {
+    const r = await sql`DELETE FROM activity_log WHERE event_slug = ${slug}`;
+    deleted = r.rowCount || 0;
+  }
+  return { success: true, deleted };
+}
+
 export default async function handler(req, res) {
   if (handleCors(req, res)) return;
   try {
@@ -43,10 +58,11 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      const { action, slug, name } = req.body || {};
+      const { action, slug, name, visitorId } = req.body || {};
       if (action === 'getEventsList') return res.status(200).json({ success: true, data: await getEventsList() });
       if (action === 'createEvent')   return res.status(200).json({ success: true, data: await createEvent(slug, name) });
       if (action === 'deleteEvent')   return res.status(200).json({ success: true, data: await deleteEvent(slug) });
+      if (action === 'deleteActivity') return res.status(200).json({ success: true, data: await deleteActivity(slug, visitorId) });
       return res.status(400).json({ success: false, error: 'Unknown action' });
     }
 
