@@ -48,6 +48,22 @@ export function getVisitorId(): string {
   } catch { return ''; }
 }
 
+// Cached, server-verified visitor identity (from Google One Tap). Used only for
+// instant form prefill on repeat visits — the analytics row is always written
+// from a freshly verified token server-side, never from this cache.
+export interface VisitorIdentity { name: string; email: string; picture?: string }
+
+export function getVisitorIdentity(): VisitorIdentity | null {
+  try {
+    const raw = localStorage.getItem('socialbuzz_visitor_identity');
+    return raw ? JSON.parse(raw) as VisitorIdentity : null;
+  } catch { return null; }
+}
+
+export function setVisitorIdentity(identity: VisitorIdentity): void {
+  try { localStorage.setItem('socialbuzz_visitor_identity', JSON.stringify(identity)); } catch {}
+}
+
 export const DEFAULT_TEMPLATE_CONFIG: TemplateConfig = {
   hasTemplate:     false,
   templateName:    '',
@@ -94,6 +110,7 @@ const ACTION_ROUTES: Record<string, string> = {
   cutout:                '/api/upload',
   uploadImage:           '/api/upload',
   logShare:              '/api/log-share',
+  identifyVisitor:       '/api/log-share',
   getEventsList:         '/api/events',
   createEvent:           '/api/events',
   deleteEvent:           '/api/events',
@@ -262,6 +279,19 @@ export function callLogShareEvent(data: ShareEventData): void {
 // Reach tracking: an event page/widget was opened. `source` = 'widget' | 'direct'.
 export function callLogOpen(eventSlug: string, source: 'widget' | 'direct'): void {
   callApi({ action: 'logShare', data: { eventSlug, eventType: 'Opened', platform: source, visitorId: getVisitorId() } }).catch(() => {});
+}
+
+// Auto-login: send a Google One Tap ID token to be verified + logged server-side.
+// On success returns the verified { name, email, picture } for form prefill.
+export function callIdentifyVisitor(
+  eventSlug: string,
+  credential: string,
+  onSuccess: (identity: VisitorIdentity) => void,
+  onFailure?: (err: Error | string) => void,
+): void {
+  callApi<VisitorIdentity>({ action: 'identifyVisitor', credential, eventSlug, visitorId: getVisitorId() })
+    .then(onSuccess)
+    .catch(err => onFailure?.(err));
 }
 
 // ── Events list ────────────────────────────────────────────────────────────────

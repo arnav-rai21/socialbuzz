@@ -31,7 +31,8 @@ import ShareButtons from './components/ShareButtons';
 import TemplateGallery from './components/TemplateGallery';
 import UserForm from './components/UserForm';
 
-import { IS_GAS, IS_GAS_ADMIN, INITIAL_EVENT_SLUG, INITIAL_MODE, DEFAULT_SLOT, buildWidgetSnippet, callDeleteActivity, callDeleteEvent, callDeleteTemplate, callGetEventStats, callLogOpen, callSaveTemplate, callUploadImage, loadBootstrap, loadBootstrapAsync } from './lib/server';
+import { GOOGLE_CLIENT_ID, IS_GAS, IS_GAS_ADMIN, INITIAL_EVENT_SLUG, INITIAL_MODE, DEFAULT_SLOT, buildWidgetSnippet, callDeleteActivity, callDeleteEvent, callDeleteTemplate, callGetEventStats, callIdentifyVisitor, callLogOpen, callSaveTemplate, callUploadImage, getVisitorIdentity, setVisitorIdentity, loadBootstrap, loadBootstrapAsync } from './lib/server';
+import { promptOneTap } from './lib/googleOneTap';
 import type { EventMeta, EventStats, FieldSettings, FontSettings, GeneratedAsset, ImageSlot, SharingSettings, TemplateConfig, TextSlot, UserProfile } from './types';
 import { DEFAULT_FIELD_SETTINGS, DEFAULT_FONT_SETTINGS, DEFAULT_SHARING_SETTINGS } from './types';
 
@@ -159,9 +160,24 @@ export default function App() {
   // stitches this visit to any later Generate/Share into one journey.
   useEffect(() => {
     const inIframe = typeof window !== 'undefined' && window.top !== window.self;
-    if (!_savedAuth && INITIAL_MODE !== 'admin') {
-      callLogOpen(INITIAL_EVENT_SLUG, inIframe ? 'widget' : 'direct');
-    }
+    if (_savedAuth || INITIAL_MODE === 'admin') return; // admins/editors are unaffected
+    callLogOpen(INITIAL_EVENT_SLUG, inIframe ? 'widget' : 'direct');
+
+    // Auto-login (Google One Tap): identify the visitor so journeys show real names,
+    // and prefill the form. Only fill empty fields — never clobber what's typed.
+    const applyIdentity = (idn: { name: string; email: string }) =>
+      setProfile(p => ({ ...p, name: p.name || idn.name || '', email: p.email || idn.email || '' }));
+
+    const cached = getVisitorIdentity();
+    if (cached) applyIdentity(cached);
+    // Even with a cache, run One Tap (auto_select) to log a freshly server-verified
+    // identity row for this visit and refresh the cache.
+    promptOneTap(GOOGLE_CLIENT_ID, (credential) => {
+      callIdentifyVisitor(INITIAL_EVENT_SLUG, credential, (identity) => {
+        setVisitorIdentity(identity);
+        applyIdentity(identity);
+      });
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

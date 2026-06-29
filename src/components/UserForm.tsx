@@ -52,6 +52,9 @@ export default function UserForm({ profile, onChange, fieldSettings }: UserFormP
           </div>
         );
       })}
+      <p className="text-[11px] leading-relaxed text-slate-400">
+        Your details are used only to personalize your post. If you sign in with Google, we use your name and email to autofill this form.
+      </p>
     </div>
   );
 }
