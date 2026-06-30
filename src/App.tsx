@@ -10,7 +10,9 @@ import {
   ImageIcon,
   Link2,
   Loader,
+  LogOut,
   PenLine,
+  RefreshCw,
   Settings,
   Sparkles,
   Trash2,
@@ -31,8 +33,9 @@ import ShareButtons from './components/ShareButtons';
 import TemplateGallery from './components/TemplateGallery';
 import UserForm from './components/UserForm';
 
-import { GOOGLE_CLIENT_ID, IS_GAS, IS_GAS_ADMIN, INITIAL_EVENT_SLUG, INITIAL_MODE, DEFAULT_SLOT, buildWidgetSnippet, callDeleteActivity, callDeleteEvent, callDeleteTemplate, callGetEventStats, callIdentifyVisitor, callLogOpen, callSaveTemplate, callUploadImage, getVisitorIdentity, setVisitorIdentity, loadBootstrap, loadBootstrapAsync } from './lib/server';
-import { promptOneTap } from './lib/googleOneTap';
+import { GOOGLE_CLIENT_ID, IS_GAS, IS_GAS_ADMIN, INITIAL_EVENT_SLUG, INITIAL_MODE, DEFAULT_SLOT, buildWidgetSnippet, callDeleteActivity, callDeleteEvent, callDeleteTemplate, callGetEventStats, callIdentifyVisitor, callLogOpen, callSaveTemplate, callUploadImage, clearVisitorIdentity, getVisitorIdentity, setVisitorIdentity, loadBootstrap, loadBootstrapAsync } from './lib/server';
+import type { VisitorIdentity } from './lib/server';
+import { promptOneTap, disableOneTapAutoSelect } from './lib/googleOneTap';
 import type { EventMeta, EventStats, FieldSettings, FontSettings, GeneratedAsset, ImageSlot, SharingSettings, TemplateConfig, TextSlot, UserProfile } from './types';
 import { DEFAULT_FIELD_SETTINGS, DEFAULT_FONT_SETTINGS, DEFAULT_SHARING_SETTINGS } from './types';
 
@@ -42,6 +45,10 @@ const initialTemplate = loadBootstrap();
 
 // Stable client key for a template: its DB id, or 'new' for an unsaved draft.
 const keyOf = (t: TemplateConfig): string => (t.id != null ? String(t.id) : 'new');
+
+// Up-to-2-char initials for the visitor avatar fallback (no Google photo).
+const initialsOf = (s: string): string =>
+  ((s || '').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()) || '?';
 
 export default function App() {
   // ── Multi-template state ──────────────────────────────────────────────────
@@ -73,6 +80,9 @@ export default function App() {
   const [adminName,      setAdminName]                  = useState(_savedAuth?.name ?? '');
   const [showAdminLogin, setShowAdminLogin]              = useState(false);
   const [isAdminOpen,    setIsAdminOpen]                = useState(false);
+  // Auto-login (attendee) identity for the header profile chip; seeded from cache.
+  const [identity,       setIdentity]                   = useState<VisitorIdentity | null>(getVisitorIdentity());
+  const [profileMenuOpen, setProfileMenuOpen]           = useState(false);
   const [isMappingMode,     setIsMappingMode]     = useState(false);
   const [isTextMappingMode, setIsTextMappingMode] = useState(false);
   const [currentView,    setCurrentView]               = useState<'form' | 'generate'>('form');
@@ -158,28 +168,53 @@ export default function App() {
   // admin/editor). Source is inferred from context — inside the widget iframe →
   // 'widget', a top-level tab → 'direct'. The visitor id (attached in callLogOpen)
   // stitches this visit to any later Generate/Share into one journey.
+  // Prefill the form from a verified identity — empty fields only, never clobber typed input.
+  function applyIdentityToForm(idn: VisitorIdentity) {
+    setProfile(p => ({ ...p, name: p.name || idn.name || '', email: p.email || idn.email || '' }));
+  }
+
+  // One Tap selected an account → verify server-side, then cache + prefill + show the chip.
+  function handleOneTapCredential(credential: string) {
+    callIdentifyVisitor(INITIAL_EVENT_SLUG, credential, (idn) => {
+      setVisitorIdentity(idn);
+      setIdentity(idn);
+      applyIdentityToForm(idn);
+    });
+  }
+
   useEffect(() => {
     const inIframe = typeof window !== 'undefined' && window.top !== window.self;
     if (_savedAuth || INITIAL_MODE === 'admin') return; // admins/editors are unaffected
     callLogOpen(INITIAL_EVENT_SLUG, inIframe ? 'widget' : 'direct');
 
-    // Auto-login (Google One Tap): identify the visitor so journeys show real names,
-    // and prefill the form. Only fill empty fields — never clobber what's typed.
-    const applyIdentity = (idn: { name: string; email: string }) =>
-      setProfile(p => ({ ...p, name: p.name || idn.name || '', email: p.email || idn.email || '' }));
-
+    // Auto-login (Google One Tap): only prompt when we don't already know the visitor —
+    // a saved identity prefills silently, so reloads don't re-ask.
     const cached = getVisitorIdentity();
-    if (cached) applyIdentity(cached);
-    // Even with a cache, run One Tap (auto_select) to log a freshly server-verified
-    // identity row for this visit and refresh the cache.
-    promptOneTap(GOOGLE_CLIENT_ID, (credential) => {
-      callIdentifyVisitor(INITIAL_EVENT_SLUG, credential, (identity) => {
-        setVisitorIdentity(identity);
-        applyIdentity(identity);
-      });
-    });
+    if (cached) applyIdentityToForm(cached);
+    else promptOneTap(GOOGLE_CLIENT_ID, handleOneTapCredential);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Attendee profile-chip actions ──────────────────────────────────────────
+  function handleAttendeeSignOut() {
+    clearVisitorIdentity();
+    disableOneTapAutoSelect();   // stop silent re-login on next load
+    setIdentity(null);
+    setProfileMenuOpen(false);
+    setProfile(p => ({ ...p, name: '', email: '' }));
+  }
+  function handleSwitchAccount() {
+    setProfileMenuOpen(false);
+    clearVisitorIdentity();
+    disableOneTapAutoSelect();
+    setIdentity(null);
+    setProfile(p => ({ ...p, name: '', email: '' }));
+    promptOneTap(GOOGLE_CLIENT_ID, handleOneTapCredential, { autoSelect: false }); // force chooser
+  }
+  function handleEditDetails() {
+    setProfileMenuOpen(false);
+    setCurrentView('form'); // make sure the editable form is in view
+  }
 
   // ── Derived active template ────────────────────────────────────────────────
   const activeTemplate: TemplateConfig =
@@ -580,6 +615,41 @@ export default function App() {
               <button onClick={handleAdminToggle} className={['w-8 h-8 flex items-center justify-center rounded-full cursor-pointer transition-colors active:scale-95', isAdminActive ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'].join(' ')}>
                 <Settings size={15} />
               </button>
+            )}
+
+            {/* Attendee profile chip (Google One Tap auto-login) */}
+            {identity && !isAdminAuthenticated && (
+              <div className="relative">
+                <button
+                  onClick={() => setProfileMenuOpen(o => !o)}
+                  title={identity.email}
+                  className="w-8 h-8 flex items-center justify-center rounded-full overflow-hidden border border-slate-200 bg-slate-100 text-slate-700 text-[11px] font-bold cursor-pointer hover:ring-2 hover:ring-violet-200 active:scale-95 transition"
+                >
+                  {identity.picture
+                    ? <img src={identity.picture} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                    : <span>{initialsOf(identity.name || identity.email)}</span>}
+                </button>
+                {profileMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setProfileMenuOpen(false)} />
+                    <div className="absolute right-0 mt-2 w-60 z-50 rounded-2xl border border-slate-100 bg-white shadow-xl overflow-hidden">
+                      <div className="px-4 py-3 border-b border-slate-100">
+                        <p className="text-sm font-bold text-slate-900 truncate">{identity.name || 'Signed in'}</p>
+                        {identity.email && <p className="text-[12px] text-slate-500 truncate">{identity.email}</p>}
+                      </div>
+                      <button onClick={handleEditDetails} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer text-left transition-colors">
+                        <PenLine size={15} className="text-slate-400" /> Edit my details
+                      </button>
+                      <button onClick={handleSwitchAccount} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer text-left transition-colors">
+                        <RefreshCw size={15} className="text-slate-400" /> Switch Google account
+                      </button>
+                      <button onClick={handleAttendeeSignOut} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 cursor-pointer text-left border-t border-slate-100 transition-colors">
+                        <LogOut size={15} /> Sign out
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
         </div>

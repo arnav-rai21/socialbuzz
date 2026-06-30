@@ -39,6 +39,7 @@ function loadGsi(): Promise<boolean> {
 export async function promptOneTap(
   clientId: string,
   onCredential: (credential: string) => void,
+  opts: { autoSelect?: boolean } = {},
 ): Promise<void> {
   if (!clientId) return;
   const ok = await loadGsi();
@@ -51,13 +52,18 @@ export async function promptOneTap(
       callback: (resp: { credential?: string }) => {
         if (resp?.credential) onCredential(resp.credential);
       },
-      auto_select: true,          // silently re-issue a token on repeat visits
-      itp_support: true,          // Safari / ITP support
-      use_fedcm_for_prompt: true, // required by Chrome's FedCM migration
+      auto_select: opts.autoSelect !== false, // silent re-issue on repeat visits; false forces the chooser ("switch account")
+      itp_support: true,                       // Safari / ITP support
+      use_fedcm_for_prompt: true,              // required by Chrome's FedCM migration
       cancel_on_tap_outside: false,
     });
     id.prompt();
   } catch {
     /* One Tap unavailable (e.g. blocked in cross-origin iframe) — fall back to the manual form. */
   }
+}
+
+/** Stop One Tap from silently re-signing the visitor in (call on sign-out). */
+export function disableOneTapAutoSelect(): void {
+  try { (window as any).google?.accounts?.id?.disableAutoSelect?.(); } catch { /* no-op */ }
 }

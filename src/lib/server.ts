@@ -64,6 +64,10 @@ export function setVisitorIdentity(identity: VisitorIdentity): void {
   try { localStorage.setItem('socialbuzz_visitor_identity', JSON.stringify(identity)); } catch {}
 }
 
+export function clearVisitorIdentity(): void {
+  try { localStorage.removeItem('socialbuzz_visitor_identity'); } catch {}
+}
+
 export const DEFAULT_TEMPLATE_CONFIG: TemplateConfig = {
   hasTemplate:     false,
   templateName:    '',
