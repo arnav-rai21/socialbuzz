@@ -1,14 +1,6 @@
 import { sql, ensureTables } from './_db.js';
 import { handleCors } from './_cors.js';
-
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@socialbuzz.app';
-
-async function isApprovedAdmin(email) {
-  if (!email) return false;
-  if (email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) return true;
-  const { rows } = await sql`SELECT email FROM admins_approved WHERE LOWER(email) = LOWER(${email})`;
-  return rows.length > 0;
-}
+import { getPlan, ensureAccount, isSuperAdmin } from './_plan.js';
 
 async function getPendingRequests() {
   const { rows: reqs } = await sql`SELECT email, name, requested_at, status FROM admin_requests ORDER BY requested_at DESC`;
@@ -28,10 +20,11 @@ export default async function handler(req, res) {
       const { action, email, adminEmail } = req.query;
 
       if (action === 'checkAdminAccess') {
-        return res.status(200).json({ success: true, data: { approved: await isApprovedAdmin(email) } });
+        await ensureAccount(email);
+        return res.status(200).json({ success: true, data: { approved: !!email, plan: await getPlan(email) } });
       }
       if (action === 'getPendingRequests') {
-        if (!await isApprovedAdmin(adminEmail)) throw new Error('Not authorized.');
+        if (!isSuperAdmin(adminEmail)) throw new Error('Not authorized.');
         return res.status(200).json({ success: true, data: await getPendingRequests() });
       }
       return res.status(400).json({ success: false, error: 'Unknown action' });
@@ -41,7 +34,8 @@ export default async function handler(req, res) {
       const { action, email, adminEmail, name } = req.body || {};
 
       if (action === 'checkAdminAccess') {
-        return res.status(200).json({ success: true, data: { approved: await isApprovedAdmin(email) } });
+        await ensureAccount(email);
+        return res.status(200).json({ success: true, data: { approved: !!email, plan: await getPlan(email) } });
       }
 
       if (action === 'requestAdminAccess') {
@@ -54,27 +48,27 @@ export default async function handler(req, res) {
       }
 
       if (action === 'approveAccessRequest') {
-        if (!await isApprovedAdmin(adminEmail)) throw new Error('Not authorized.');
+        if (!isSuperAdmin(adminEmail)) throw new Error('Not authorized.');
         await sql`INSERT INTO admins_approved (email) VALUES (LOWER(${email})) ON CONFLICT DO NOTHING`;
         await sql`UPDATE admin_requests SET status = 'approved' WHERE LOWER(email) = LOWER(${email})`;
         return res.status(200).json({ success: true, data: { success: true } });
       }
 
       if (action === 'denyAccessRequest') {
-        if (!await isApprovedAdmin(adminEmail)) throw new Error('Not authorized.');
+        if (!isSuperAdmin(adminEmail)) throw new Error('Not authorized.');
         await sql`UPDATE admin_requests SET status = 'denied' WHERE LOWER(email) = LOWER(${email})`;
         return res.status(200).json({ success: true, data: { success: true } });
       }
 
       if (action === 'revokeAdminAccess') {
-        if (!await isApprovedAdmin(adminEmail)) throw new Error('Not authorized.');
-        if (email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) throw new Error('Cannot revoke super-admin access.');
+        if (!isSuperAdmin(adminEmail)) throw new Error('Not authorized.');
+        if (isSuperAdmin(email)) throw new Error('Cannot revoke super-admin access.');
         await sql`DELETE FROM admins_approved WHERE LOWER(email) = LOWER(${email})`;
         return res.status(200).json({ success: true, data: { success: true } });
       }
 
       if (action === 'getPendingRequests') {
-        if (!await isApprovedAdmin(adminEmail)) throw new Error('Not authorized.');
+        if (!isSuperAdmin(adminEmail)) throw new Error('Not authorized.');
         return res.status(200).json({ success: true, data: await getPendingRequests() });
       }
 

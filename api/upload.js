@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { uploadToS3 } from './_s3.js';
 import { handleCors } from './_cors.js';
 import { sql } from './_db.js';
+import { getEventOwnerPlan } from './_plan.js';
 
 const APP_BASE_URL = process.env.APP_BASE_URL || 'https://socialbuzz.vercel.app';
 
@@ -79,8 +80,13 @@ async function handleRemoveBackground(req, res) {
   const keys = getCutoutKeys();
   if (!keys.length) throw new Error('Background removal is not configured. Add CUTOUT_PRO_API_KEY to env vars.');
 
-  const { base64Data, op } = req.body || {};
+  const { base64Data, op, eventSlug } = req.body || {};
   if (!base64Data) throw new Error('No image provided.');
+
+  // Pro feature: remove-bg / enhance allowed only on a Pro owner's event.
+  if (await getEventOwnerPlan(eventSlug || 'default') === 'free') {
+    throw new Error('UPGRADE_REQUIRED: Remove background & Enhance are Pro features. Upgrade to Pro to enable them.');
+  }
 
   const raw = String(base64Data).replace(/^data:image\/[^;]+;base64,/, '');
   if (raw.length > MAX_BASE64_LENGTH) throw new Error('Image too large (max ~15 MB).');

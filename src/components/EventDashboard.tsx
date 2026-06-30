@@ -17,6 +17,7 @@ import {
   Percent,
   Plus,
   Share2,
+  Sparkles,
   Target,
   ShieldOff,
   Trash2,
@@ -48,6 +49,8 @@ interface EventDashboardProps {
   eventsList:  EventMeta[];
   adminEmail:  string;
   adminName?:  string;
+  plan?:       'free' | 'pro';
+  onUpgrade?:  () => void;
   onEditEvent: (slug: string) => void;
   onClose:     () => void;
   onLogout:    () => void;
@@ -531,6 +534,8 @@ export default function EventDashboard({
   eventsList,
   adminEmail,
   adminName,
+  plan = 'free',
+  onUpgrade,
   onEditEvent,
   onClose,
   onLogout,
@@ -621,7 +626,9 @@ export default function EventDashboard({
       resetCreateForm();
       toast.success(`Event "${name}" created!`);
     } catch (err) {
-      toast.error(`Failed to create event: ${(err as Error)?.message ?? String(err)}`);
+      const msg = (err as Error)?.message ?? String(err);
+      if (msg.includes('UPGRADE_REQUIRED')) { resetCreateForm(); onUpgrade?.(); }
+      else toast.error(`Failed to create event: ${msg}`);
     } finally {
       setIsCreating(false);
     }
@@ -731,8 +738,17 @@ export default function EventDashboard({
 
           {/* Right: new event + user + logout */}
           <div className="flex items-center gap-2 flex-shrink-0">
+            {plan === 'free' && (
+              <button
+                onClick={() => onUpgrade?.()}
+                className="hidden sm:flex items-center gap-1 px-3 py-1.5 rounded-full bg-white text-violet-700 text-[11px] font-bold hover:bg-white/90 cursor-pointer transition-colors active:scale-95"
+                title="Upgrade to Pro"
+              >
+                <Sparkles size={12} /> Upgrade
+              </button>
+            )}
             <button
-              onClick={() => { resetCreateForm(); setShowCreateForm(true); }}
+              onClick={() => { if (plan === 'free' && events.length >= 1) { onUpgrade?.(); return; } resetCreateForm(); setShowCreateForm(true); }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/15 border border-white/20 text-white text-[11px] font-bold hover:bg-white/25 cursor-pointer transition-colors active:scale-95"
             >
               <Plus size={13} /> New Event

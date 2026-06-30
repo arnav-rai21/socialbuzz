@@ -1,6 +1,7 @@
 import { sql, ensureTables } from './_db.js';
 import { uploadToS3 } from './_s3.js';
 import { handleCors } from './_cors.js';
+import { getEventOwnerPlan, FREE_LIMITS } from './_plan.js';
 
 const DEFAULT_SLOT = { x: 880, y: 640, width: 520, height: 520, radius: 32 };
 
@@ -114,6 +115,11 @@ async function saveTemplate(payload) {
     const { rows: countRows } = await sql`SELECT COUNT(*)::int AS n FROM event_templates WHERE slug = ${slug}`;
     const isFirst = countRows[0].n === 0;
     const position = countRows[0].n;
+
+    // Free-tier hard limit: one template per event.
+    if (countRows[0].n >= FREE_LIMITS.maxTemplatesPerEvent && await getEventOwnerPlan(slug) === 'free') {
+      throw new Error('UPGRADE_REQUIRED: The Free plan allows 1 template per event. Upgrade to Pro for multiple templates.');
+    }
 
     const { rows: inserted } = await sql`
       INSERT INTO event_templates (slug, template_name, image_slot, text_slot, font_settings, position, is_default)

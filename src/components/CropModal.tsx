@@ -11,11 +11,13 @@ interface CropModalProps {
   open: boolean;
   imageSrc: string;
   slot: ImageSlot;
+  /** Remove-bg / Enhance are Pro features — hidden unless the event owner is on Pro. */
+  cutoutEnabled?: boolean;
   onApply: (croppedDataUrl: string) => void;
   onClose: () => void;
 }
 
-export default function CropModal({ open, imageSrc, slot, onApply, onClose }: CropModalProps) {
+export default function CropModal({ open, imageSrc, slot, cutoutEnabled = true, onApply, onClose }: CropModalProps) {
   const cropperRef = useRef<any>(null);
 
   // The image currently shown in the cropper. Starts as the uploaded photo and
@@ -145,7 +147,8 @@ export default function CropModal({ open, imageSrc, slot, onApply, onClose }: Cr
               )}
             </div>
 
-            {/* AI photo tools */}
+            {/* AI photo tools (Pro only) */}
+            {cutoutEnabled && (
             <div className="flex gap-2">
               <button
                 onClick={() => runProcess('bg')}
@@ -174,6 +177,7 @@ export default function CropModal({ open, imageSrc, slot, onApply, onClose }: Cr
                 </button>
               )}
             </div>
+            )}
 
             {/* Actions */}
             <div className="flex gap-3">

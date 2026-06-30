@@ -73,7 +73,7 @@ const PRICING: PricingTier[] = [
     name: 'Starter',
     tagline: 'For trying it out',
     priceMonthly: 0,
-    cta: 'Get started',
+    cta: 'Try for free',
     highlight: false,
     note: 'No credit card required',
     features: [
@@ -89,7 +89,7 @@ const PRICING: PricingTier[] = [
     name: 'Pro',
     tagline: 'For active organizers',
     priceMonthly: 50,
-    cta: 'Get started',
+    cta: 'Try for free',
     highlight: true,
     features: [
       'Unlimited events',
@@ -146,7 +146,7 @@ export default function MarketingPage({ onGetStarted }: Props) {
               className="rounded-xl px-4 py-2 text-[13px] font-bold text-white transition-all duration-200 hover:-translate-y-0.5 active:scale-95"
               style={{ background: BRAND_GRADIENT, boxShadow: '0 4px 14px rgba(124,58,237,0.35)' }}
             >
-              Admin Login
+              Try for free
             </button>
           </div>
         </nav>

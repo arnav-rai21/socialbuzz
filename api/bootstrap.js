@@ -1,5 +1,6 @@
 import { sql, ensureTables } from './_db.js';
 import { handleCors } from './_cors.js';
+import { getEventOwnerPlan } from './_plan.js';
 
 const ADMIN_EMAIL  = process.env.ADMIN_EMAIL  || 'admin@socialbuzz.app';
 const APP_BASE_URL = process.env.APP_BASE_URL || 'https://socialbuzz.vercel.app';
@@ -111,10 +112,15 @@ export default async function handler(req, res) {
       linkedInRedirectUri: LINKEDIN_REDIRECT,
       googleClientId:      process.env.GOOGLE_CLIENT_ID    || '',
       googleRedirectUri:   process.env.GOOGLE_REDIRECT_URI || `${APP_BASE_URL}/api/google-callback`,
+      eventPlan:           await getEventOwnerPlan(eventSlug), // 'free' | 'pro' — gates attendee remove-bg/enhance
     };
 
     if (mode === 'admin') {
-      const { rows } = await sql`SELECT slug, name, created_at, updated_at FROM events_list ORDER BY created_at DESC`;
+      // Per-account: only the caller's own events (super-admin owns the backfilled legacy events).
+      const ownerEmail = req.query.adminEmail || '';
+      const { rows } = ownerEmail
+        ? await sql`SELECT slug, name, created_at, updated_at FROM events_list WHERE LOWER(owner_email) = LOWER(${ownerEmail}) ORDER BY created_at DESC`
+        : { rows: [] };
       data.eventsList = rows.map(r => ({ slug: r.slug, name: r.name, createdAt: r.created_at, updatedAt: r.updated_at }));
     }
 

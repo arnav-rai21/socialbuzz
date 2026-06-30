@@ -108,6 +108,15 @@ export function buildWidgetSnippet(o: WidgetSnippetOpts): string {
 
 // ── Route map: action → API endpoint ─────────────────────────────────────────
 
+// The signed-in admin's email (from the admin session) — attached to event
+// calls so the server can scope events per account and enforce plan limits.
+function getAdminEmail(): string {
+  try {
+    const raw = sessionStorage.getItem('socialbuzz_admin_auth');
+    return raw ? (JSON.parse(raw).email || '') : '';
+  } catch { return ''; }
+}
+
 const ACTION_ROUTES: Record<string, string> = {
   saveTemplate:          '/api/template',
   deleteTemplate:        '/api/template',
@@ -177,10 +186,12 @@ export async function loadBootstrapAsync(eventSlug: string): Promise<{
   linkedInRedirectUri?: string;
   googleClientId?:     string;
   googleRedirectUri?:  string;
+  eventPlan?:          'free' | 'pro';
 } | null> {
   try {
-    const mode = INITIAL_MODE;
-    const url  = `/api/bootstrap?event=${encodeURIComponent(eventSlug)}${mode ? `&mode=${encodeURIComponent(mode)}` : ''}`;
+    const mode    = INITIAL_MODE;
+    const adminQ  = mode === 'admin' ? `&adminEmail=${encodeURIComponent(getAdminEmail())}` : '';
+    const url     = `/api/bootstrap?event=${encodeURIComponent(eventSlug)}${mode ? `&mode=${encodeURIComponent(mode)}` : ''}${adminQ}`;
     const res  = await fetch(url);
     const text = await res.text();
     if (!text.trimStart().startsWith('{')) return null;
@@ -233,7 +244,7 @@ export function callCutout(
   onSuccess:  (result: { base64Data: string }) => void,
   onFailure:  (err: Error | string) => void
 ): void {
-  callApi<{ base64Data: string }>({ action: 'cutout', base64Data, op })
+  callApi<{ base64Data: string }>({ action: 'cutout', base64Data, op, eventSlug: INITIAL_EVENT_SLUG })
     .then(onSuccess)
     .catch(onFailure);
 }
@@ -304,7 +315,7 @@ export function callGetEventsList(
   onSuccess: (result: { events: import('../types').EventMeta[] }) => void,
   onFailure: (err: Error | string) => void
 ): void {
-  callApi<{ events: import('../types').EventMeta[] }>({ action: 'getEventsList' })
+  callApi<{ events: import('../types').EventMeta[] }>({ action: 'getEventsList', adminEmail: getAdminEmail() })
     .then(onSuccess)
     .catch(onFailure);
 }
@@ -317,7 +328,7 @@ export function callCreateEvent(
   onSuccess: (result: { success: boolean; slug: string; name: string }) => void,
   onFailure: (err: Error | string) => void
 ): void {
-  callApi<{ success: boolean; slug: string; name: string }>({ action: 'createEvent', slug, name })
+  callApi<{ success: boolean; slug: string; name: string }>({ action: 'createEvent', slug, name, adminEmail: getAdminEmail() })
     .then(onSuccess)
     .catch(onFailure);
 }
@@ -329,7 +340,7 @@ export function callDeleteEvent(
   onSuccess: (result: { success: boolean }) => void,
   onFailure: (err: Error | string) => void
 ): void {
-  callApi<{ success: boolean }>({ action: 'deleteEvent', slug })
+  callApi<{ success: boolean }>({ action: 'deleteEvent', slug, adminEmail: getAdminEmail() })
     .then(onSuccess)
     .catch(onFailure);
 }
@@ -373,10 +384,10 @@ export function callCheckGoogleToken(
 
 export function callCheckAdminAccess(
   email:     string,
-  onSuccess: (result: { approved: boolean }) => void,
+  onSuccess: (result: { approved: boolean; plan?: 'free' | 'pro' }) => void,
   onFailure: (err: Error | string) => void
 ): void {
-  callApi<{ approved: boolean }>({ action: 'checkAdminAccess', email })
+  callApi<{ approved: boolean; plan?: 'free' | 'pro' }>({ action: 'checkAdminAccess', email })
     .then(onSuccess)
     .catch(onFailure);
 }

@@ -15,7 +15,7 @@ type Phase =
   | 'error';
 
 interface AdminLoginProps {
-  onAuthenticated: (email: string, name: string) => void;
+  onAuthenticated: (email: string, name: string, plan: 'free' | 'pro') => void;
   onClose:         () => void;
   /** Open the Google sign-in popup immediately on mount (one-click from homepage). */
   autoStart?:      boolean;
@@ -201,22 +201,17 @@ export default function AdminLogin({ onAuthenticated, onClose, autoStart }: Admi
     setPendingName(name);
     setPhase('checking');
 
-    // Super-admin is always approved — no round-trip needed
-    if (email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-      onAuthenticated(email, name);
-      return;
-    }
-
+    // Self-serve: any verified Google account is allowed; the server returns the
+    // account's plan ('free' by default, 'pro' for the super-admin / upgraded accounts).
     callCheckAdminAccess(
       email,
       (result) => {
-        if (result.approved) {
-          onAuthenticated(email, name);
-        } else {
-          setPhase('access_denied');
-        }
+        onAuthenticated(email, name, result.plan || 'free');
       },
-      () => setPhase('access_denied')
+      () => {
+        setPhase('error');
+        setErrorMsg('Could not verify your account. Please try again.');
+      }
     );
   }
 

@@ -1,5 +1,6 @@
 import { handleCors } from './_cors.js';
 import { sql } from './_db.js';
+import { getEventOwnerPlan } from './_plan.js';
 
 const EMPTY_STATS = {
   totalGenerates: 0, totalShares: 0, byPlatform: {}, recentUsers: [],
@@ -76,6 +77,9 @@ export default async function handler(req, res) {
 
     // CSV export of the per-visitor journey (served by this same route — no extra function).
     if (req.query.format === 'csv') {
+      if (await getEventOwnerPlan(slug) === 'free') {
+        return res.status(200).json({ success: false, error: 'UPGRADE_REQUIRED: CSV export is a Pro feature. Upgrade to Pro to export visitor journeys.' });
+      }
       const journeys = await loadJourneys(sql, slug);
       const safeSlug = String(slug).replace(/[^a-z0-9_-]/gi, '') || 'event';
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');

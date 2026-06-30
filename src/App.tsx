@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import {
   BarChart2,
   Camera,
+  Check,
   ChevronLeft,
   CloudUpload,
   Code2,
@@ -10,6 +11,7 @@ import {
   ImageIcon,
   Link2,
   Loader,
+  Lock,
   LogOut,
   PenLine,
   RefreshCw,
@@ -50,6 +52,46 @@ const keyOf = (t: TemplateConfig): string => (t.id != null ? String(t.id) : 'new
 const initialsOf = (s: string): string =>
   ((s || '').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()) || '?';
 
+// Placeholder upgrade modal — self-serve billing is not wired yet, so this
+// explains Pro and points to a contact link. Shown on any Pro-gated action.
+function UpgradeModal({ onClose }: { onClose: () => void }) {
+  const benefits = [
+    'Unlimited events',
+    'Multiple templates per event',
+    'Remove background & Enhance',
+    'Premium analytics + CSV export',
+    'Embeddable widget',
+  ];
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-3xl bg-white p-7 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl text-white" style={{ background: 'linear-gradient(135deg, #7c3aed, #ec4899)' }}>
+          <Sparkles size={22} />
+        </div>
+        <h2 className="text-xl font-black text-slate-900">Upgrade to Pro</h2>
+        <p className="mt-1.5 text-sm text-slate-500">Self-serve billing is coming soon. Pro unlocks:</p>
+        <ul className="mt-4 flex flex-col gap-2.5">
+          {benefits.map((b) => (
+            <li key={b} className="flex items-start gap-2.5 text-[13.5px] text-slate-700">
+              <Check size={16} strokeWidth={2.6} className="mt-0.5 shrink-0 text-violet-600" /> {b}
+            </li>
+          ))}
+        </ul>
+        <a
+          href="mailto:admin@socialbuzz.app?subject=Upgrade%20to%20SocialBuzz%20Pro"
+          className="mt-6 block w-full rounded-2xl py-3 text-center text-[14px] font-bold text-white"
+          style={{ background: 'linear-gradient(135deg, #7c3aed, #ec4899)' }}
+        >
+          Contact us to upgrade
+        </a>
+        <button onClick={onClose} className="mt-2 w-full rounded-2xl py-2.5 text-[13px] font-semibold text-slate-500 hover:bg-slate-50">
+          Maybe later
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   // ── Multi-template state ──────────────────────────────────────────────────
   // `templates` holds every template for the current event; at most one may be an
@@ -71,13 +113,16 @@ export default function App() {
   const _savedAuth = (() => {
     try {
       const raw = sessionStorage.getItem('socialbuzz_admin_auth');
-      return raw ? JSON.parse(raw) as { email: string; name: string } : null;
+      return raw ? JSON.parse(raw) as { email: string; name: string; plan?: 'free' | 'pro' } : null;
     } catch { return null; }
   })();
 
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(IS_GAS_ADMIN || !!_savedAuth);
   const [adminEmail,     setAdminEmail]                 = useState(_savedAuth?.email ?? '');
   const [adminName,      setAdminName]                  = useState(_savedAuth?.name ?? '');
+  const [adminPlan,      setAdminPlan]                  = useState<'free' | 'pro'>(_savedAuth?.plan ?? 'free');
+  const [eventPlan,      setEventPlan]                  = useState<'free' | 'pro'>('pro'); // current event's owner plan (gates attendee cutout)
+  const [showUpgrade,    setShowUpgrade]               = useState(false);
   const [showAdminLogin, setShowAdminLogin]              = useState(false);
   const [isAdminOpen,    setIsAdminOpen]                = useState(false);
   // Auto-login (attendee) identity for the header profile chip; seeded from cache.
@@ -158,6 +203,7 @@ export default function App() {
       if (sharing) setSharingSettings(sharing);
       if (fields)  setFieldSettings(fields);
 
+      if (data.eventPlan) setEventPlan(data.eventPlan);
       if (Array.isArray(data.eventsList)) setEventsList(data.eventsList);
     });
     // Re-fetch whenever the event being edited/viewed changes (e.g. switching
@@ -259,10 +305,11 @@ export default function App() {
     if (!next) { setIsMappingMode(false); setIsTextMappingMode(false); }
   }
 
-  function handleAuthenticated(email: string, name: string) {
-    try { sessionStorage.setItem('socialbuzz_admin_auth', JSON.stringify({ email, name })); } catch {}
+  function handleAuthenticated(email: string, name: string, plan: 'free' | 'pro' = 'free') {
+    try { sessionStorage.setItem('socialbuzz_admin_auth', JSON.stringify({ email, name, plan })); } catch {}
     setAdminEmail(email);
     setAdminName(name);
+    setAdminPlan(plan);
     setIsAdminAuthenticated(true);
     setShowAdminLogin(false);
     setShowLanding(false);
@@ -274,9 +321,19 @@ export default function App() {
     setIsAdminAuthenticated(false);
     setAdminEmail('');
     setAdminName('');
+    setAdminPlan('free');
     setIsAdminOpen(false);
     setAppMode('app');
     setShowLanding(true);
+  }
+
+  // Entitlement helpers. Pro unlocks everything; Free hits hard limits server-side too.
+  const isPro = adminPlan === 'pro';
+  // Surface the server's UPGRADE_REQUIRED rejections as the upgrade modal.
+  function isUpgradeError(err: Error | string): boolean {
+    const msg = typeof err === 'string' ? err : (err?.message || '');
+    if (msg.includes('UPGRADE_REQUIRED')) { setShowUpgrade(true); return true; }
+    return false;
   }
 
   // ── Template ──────────────────────────────────────────────────────────────
@@ -388,7 +445,7 @@ export default function App() {
         setIsTextMappingMode(false);
         toast.success('Template & settings saved!');
       },
-      (err) => { setIsSavingTemplate(false); toast.error(`Save failed: ${(err as Error)?.message ?? err}`); }
+      (err) => { setIsSavingTemplate(false); if (!isUpgradeError(err)) toast.error(`Save failed: ${(err as Error)?.message ?? err}`); }
     );
   }
 
@@ -579,21 +636,26 @@ export default function App() {
   // Admin dashboard mode — full-screen dashboard for event management
   if (appMode === 'admin-dashboard' && isAdminAuthenticated) {
     return (
-      <EventDashboard
-        eventsList={eventsList}
-        adminEmail={adminEmail}
-        adminName={adminName}
-        onEditEvent={(slug) => {
-          setEventSlug(slug);
-          setAppMode('app');
-          setIsAdminOpen(true);
-          setEditorSection('template');
-          setEditStats(null);
-          setConfirmDeleteEvent(false);
-        }}
-        onClose={() => setAppMode('app')}
-        onLogout={handleLogout}
-      />
+      <>
+        <EventDashboard
+          eventsList={eventsList}
+          adminEmail={adminEmail}
+          adminName={adminName}
+          plan={adminPlan}
+          onUpgrade={() => setShowUpgrade(true)}
+          onEditEvent={(slug) => {
+            setEventSlug(slug);
+            setAppMode('app');
+            setIsAdminOpen(true);
+            setEditorSection('template');
+            setEditStats(null);
+            setConfirmDeleteEvent(false);
+          }}
+          onClose={() => setAppMode('app')}
+          onLogout={handleLogout}
+        />
+        {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} />}
+      </>
     );
   }
 
@@ -615,6 +677,13 @@ export default function App() {
             {isAdminAuthenticated && appMode === 'app' && (
               <button onClick={() => setAppMode('admin-dashboard')} className="flex items-center gap-0.5 pl-1 pr-2.5 py-1.5 rounded-full bg-violet-50 text-violet-600 border border-violet-100 hover:bg-violet-100 cursor-pointer transition-colors active:scale-95 text-sm font-semibold">
                 <ChevronLeft size={17} /> Dashboard
+              </button>
+            )}
+            {isAdminAuthenticated && !isPro && (
+              <button onClick={() => setShowUpgrade(true)}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-full text-white text-[12px] font-bold cursor-pointer transition-all active:scale-95 hover:-translate-y-0.5"
+                style={{ background: 'linear-gradient(135deg, #7c3aed, #ec4899)' }}>
+                <Sparkles size={12} /> Upgrade
               </button>
             )}
             {isAdminAuthenticated && (
@@ -682,20 +751,22 @@ export default function App() {
         <div className="flex-shrink-0 border-b border-slate-200 bg-white overflow-x-auto">
           <div className="flex gap-1 px-3 sm:px-5 min-w-max">
             {([
-              { key: 'template'  as const, label: 'Template',     Icon: PenLine },
-              { key: 'analytics' as const, label: 'Analytics',    Icon: BarChart2 },
-              { key: 'share'     as const, label: 'Share & Open', Icon: Link2 },
-              { key: 'embed'     as const, label: 'Embed',        Icon: Code2 },
-              { key: 'delete'    as const, label: 'Delete',       Icon: Trash2 },
-            ]).map(({ key, label, Icon }) => {
+              { key: 'template'  as const, label: 'Template',     Icon: PenLine,   pro: false },
+              { key: 'analytics' as const, label: 'Analytics',    Icon: BarChart2, pro: true  },
+              { key: 'share'     as const, label: 'Share & Open', Icon: Link2,     pro: false },
+              { key: 'embed'     as const, label: 'Embed',        Icon: Code2,     pro: true  },
+              { key: 'delete'    as const, label: 'Delete',       Icon: Trash2,    pro: false },
+            ]).map(({ key, label, Icon, pro }) => {
               const active = editorSection === key;
               const danger = key === 'delete';
+              const locked = pro && !isPro;
               return (
-                <button key={key} onClick={() => selectEditorSection(key)}
+                <button key={key} onClick={() => (locked ? setShowUpgrade(true) : selectEditorSection(key))}
                   className={['flex items-center gap-1.5 px-3 sm:px-4 py-3 text-sm font-bold border-b-2 -mb-px whitespace-nowrap cursor-pointer transition-colors',
                     active ? (danger ? 'border-red-500 text-red-600' : 'border-violet-600 text-violet-600')
                            : (danger ? 'border-transparent text-red-400 hover:text-red-600' : 'border-transparent text-slate-500 hover:text-slate-700')].join(' ')}>
                   <Icon size={15} /> {label}
+                  {locked && <Lock size={11} className="opacity-50" />}
                 </button>
               );
             })}
@@ -1173,7 +1244,8 @@ export default function App() {
 
       {/* Modals */}
       {showAdminLogin && <AdminLogin onAuthenticated={handleAuthenticated} onClose={() => setShowAdminLogin(false)} />}
-      <CropModal open={cropModalOpen} imageSrc={userRawDataUrl} slot={activeTemplate.imageSlot} onApply={handleCropApply} onClose={() => setCropModalOpen(false)} />
+      {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} />}
+      <CropModal open={cropModalOpen} imageSrc={userRawDataUrl} slot={activeTemplate.imageSlot} cutoutEnabled={eventPlan === 'pro'} onApply={handleCropApply} onClose={() => setCropModalOpen(false)} />
 
       {/* Hidden file inputs */}
       <input ref={galleryInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"

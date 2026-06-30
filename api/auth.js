@@ -1,14 +1,6 @@
 import { sql, ensureTables } from './_db.js';
 import { handleCors } from './_cors.js';
-
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@socialbuzz.app';
-
-async function isApprovedAdmin(email) {
-  if (!email) return false;
-  if (email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) return true;
-  const { rows } = await sql`SELECT email FROM admins_approved WHERE LOWER(email) = LOWER(${email})`;
-  return rows.length > 0;
-}
+import { getPlan, ensureAccount } from './_plan.js';
 
 async function checkGoogleToken(state) {
   if (!state) return { ready: false };
@@ -18,7 +10,10 @@ async function checkGoogleToken(state) {
   if (!rows[0]) return { ready: false };
   await sql`DELETE FROM oauth_sessions WHERE state = ${state} AND type = 'google'`;
   const session = rows[0].data;
-  return { ready: true, email: session.email || '', name: session.name || '', approved: await isApprovedAdmin(session.email) };
+  const email = session.email || '';
+  // Self-serve: any verified Google sign-in gets an account (Free by default).
+  await ensureAccount(email);
+  return { ready: true, email, name: session.name || '', approved: !!email, plan: await getPlan(email) };
 }
 
 export default async function handler(req, res) {

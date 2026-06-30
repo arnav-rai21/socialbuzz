@@ -17,6 +17,8 @@ export async function ensureTables() {
       created_at  TIMESTAMPTZ DEFAULT NOW(),
       updated_at  TIMESTAMPTZ DEFAULT NOW()
     )`;
+  // Multi-tenancy: every event is owned by the account that created it.
+  await sql`ALTER TABLE events_list ADD COLUMN IF NOT EXISTS owner_email TEXT`;
   await sql`
     CREATE TABLE IF NOT EXISTS events_config (
       slug                 TEXT PRIMARY KEY,
@@ -83,6 +85,18 @@ export async function ensureTables() {
       PRIMARY KEY (state, type)
     )`;
   await sql`DELETE FROM oauth_sessions WHERE expires_at < NOW()`;
+
+  // ── Plans (Free/Pro entitlements, keyed by account email) ──────────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS account_plans (
+      email      TEXT PRIMARY KEY,
+      plan       TEXT DEFAULT 'free',
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`;
+  // Backfill: existing (pre-multi-tenancy) events belong to the super-admin (Pro).
+  const SUPER_ADMIN = (process.env.ADMIN_EMAIL || 'admin@socialbuzz.app').toLowerCase();
+  await sql`UPDATE events_list SET owner_email = ${SUPER_ADMIN} WHERE owner_email IS NULL`;
+
   initialized = true;
 }
 
