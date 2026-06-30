@@ -35,7 +35,7 @@ import UserForm from './components/UserForm';
 
 import { GOOGLE_CLIENT_ID, IS_GAS, IS_GAS_ADMIN, INITIAL_EVENT_SLUG, INITIAL_MODE, DEFAULT_SLOT, buildWidgetSnippet, callDeleteActivity, callDeleteEvent, callDeleteTemplate, callGetEventStats, callIdentifyVisitor, callLogOpen, callSaveTemplate, callUploadImage, clearVisitorIdentity, getVisitorIdentity, setVisitorIdentity, loadBootstrap, loadBootstrapAsync } from './lib/server';
 import type { VisitorIdentity } from './lib/server';
-import { promptOneTap, disableOneTapAutoSelect, renderGoogleButton } from './lib/googleOneTap';
+import { promptOneTap, disableOneTapAutoSelect } from './lib/googleOneTap';
 import type { EventMeta, EventStats, FieldSettings, FontSettings, GeneratedAsset, ImageSlot, SharingSettings, TemplateConfig, TextSlot, UserProfile } from './types';
 import { DEFAULT_FIELD_SETTINGS, DEFAULT_FONT_SETTINGS, DEFAULT_SHARING_SETTINGS } from './types';
 
@@ -83,7 +83,6 @@ export default function App() {
   // Auto-login (attendee) identity for the header profile chip; seeded from cache.
   const [identity,       setIdentity]                   = useState<VisitorIdentity | null>(getVisitorIdentity());
   const [profileMenuOpen, setProfileMenuOpen]           = useState(false);
-  const googleBtnRef                                    = useRef<HTMLDivElement>(null);
   const [isMappingMode,     setIsMappingMode]     = useState(false);
   const [isTextMappingMode, setIsTextMappingMode] = useState(false);
   const [currentView,    setCurrentView]               = useState<'form' | 'generate'>('form');
@@ -196,15 +195,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Reliable explicit "Sign in with Google" button for signed-out attendees.
-  // Always available (no One Tap cooldown), so switching/sign-out can never strand.
-  useEffect(() => {
-    if (_savedAuth || INITIAL_MODE === 'admin') return;
-    if (identity || !googleBtnRef.current) return;
-    renderGoogleButton(googleBtnRef.current, GOOGLE_CLIENT_ID, handleOneTapCredential);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity]);
-
   // ── Attendee profile-chip actions ──────────────────────────────────────────
   function handleAttendeeSignOut() {
     clearVisitorIdentity();
@@ -215,11 +205,11 @@ export default function App() {
   }
   function handleSwitchAccount() {
     setProfileMenuOpen(false);
-    clearVisitorIdentity();
+    // Non-destructive: keep the current identity until a NEW sign-in is verified,
+    // so dismissing/cooldown never strands the visitor. handleOneTapCredential
+    // replaces the identity only on success.
     disableOneTapAutoSelect();
-    setIdentity(null);
-    setProfile(p => ({ ...p, name: '', email: '' }));
-    promptOneTap(GOOGLE_CLIENT_ID, handleOneTapCredential, { autoSelect: false }); // force chooser
+    promptOneTap(GOOGLE_CLIENT_ID, handleOneTapCredential, { autoSelect: false });
   }
   function handleEditDetails() {
     setProfileMenuOpen(false);
@@ -625,11 +615,6 @@ export default function App() {
               <button onClick={handleAdminToggle} className={['w-8 h-8 flex items-center justify-center rounded-full cursor-pointer transition-colors active:scale-95', isAdminActive ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'].join(' ')}>
                 <Settings size={15} />
               </button>
-            )}
-
-            {/* Signed-out attendee: reliable Google sign-in button (also the recovery affordance) */}
-            {!identity && !isAdminAuthenticated && (
-              <div ref={googleBtnRef} className="flex items-center [color-scheme:light]" />
             )}
 
             {/* Attendee profile chip (Google One Tap auto-login) */}
