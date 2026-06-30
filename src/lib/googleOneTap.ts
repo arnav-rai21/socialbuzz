@@ -67,3 +67,33 @@ export async function promptOneTap(
 export function disableOneTapAutoSelect(): void {
   try { (window as any).google?.accounts?.id?.disableAutoSelect?.(); } catch { /* no-op */ }
 }
+
+/**
+ * Render Google's official "Sign in with Google" button into `container`.
+ * Clicking it reliably opens the account chooser (unlike the passive One Tap
+ * prompt, it isn't subject to display cooldowns) — so it's the dependable
+ * sign-in / switch-account entry point and a guaranteed recovery affordance.
+ */
+export async function renderGoogleButton(
+  container: HTMLElement,
+  clientId: string,
+  onCredential: (credential: string) => void,
+): Promise<void> {
+  if (!clientId || !container) return;
+  const ok = await loadGsi();
+  if (!ok) return;
+  const id = (window as any).google?.accounts?.id;
+  if (!id) return;
+  try {
+    id.initialize({
+      client_id: clientId,
+      callback: (resp: { credential?: string }) => { if (resp?.credential) onCredential(resp.credential); },
+      use_fedcm_for_prompt: true,
+      itp_support: true,
+    });
+    container.innerHTML = '';
+    id.renderButton(container, { type: 'standard', theme: 'outline', size: 'medium', text: 'signin_with', shape: 'pill' });
+  } catch {
+    /* no-op */
+  }
+}
