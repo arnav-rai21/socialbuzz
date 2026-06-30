@@ -47,6 +47,8 @@ export async function getEventOwner(slug) {
 }
 
 // Plan of the account that owns a given event (drives per-event / attendee gates).
+// The platform's 'default' fallback event is always treated as Pro.
 export async function getEventOwnerPlan(slug) {
+  if (!slug || slug === 'default') return 'pro';
   return getPlan(await getEventOwner(slug));
 }
