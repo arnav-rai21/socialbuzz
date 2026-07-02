@@ -263,6 +263,11 @@ export function StatsView({
   embedded?:  boolean;
   onDeleteActivity?: (visitorId?: string) => void;
 }) {
+  // User Journeys pagination — 25 per page so a large event (500+ visitors)
+  // doesn't render one giant table.
+  const JOURNEYS_PER_PAGE = 25;
+  const [journeyPage, setJourneyPage] = useState(0);
+
   const platforms       = stats.byPlatform ?? {};
   const platformEntries = Object.entries(platforms).sort((a, b) => b[1] - a[1]);
   const maxPlatformCount = platformEntries.length > 0 ? platformEntries[0][1] : 1;
@@ -434,6 +439,10 @@ export function StatsView({
           {(() => {
             const journeys = stats.journeys ?? [];
             const csvUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/stats?slug=${encodeURIComponent(slug)}&format=csv`;
+            const totalPages   = Math.max(1, Math.ceil(journeys.length / JOURNEYS_PER_PAGE));
+            const page         = Math.min(journeyPage, totalPages - 1);
+            const pageStart    = page * JOURNEYS_PER_PAGE;
+            const pageJourneys = journeys.slice(pageStart, pageStart + JOURNEYS_PER_PAGE);
             return (
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
@@ -467,6 +476,7 @@ export function StatsView({
                     <p className="text-sm font-medium">No visitor data yet</p>
                   </div>
                 ) : (
+                  <>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm min-w-[640px]">
                       <thead>
@@ -480,7 +490,7 @@ export function StatsView({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {journeys.map((j) => {
+                        {pageJourneys.map((j) => {
                           const label = j.name || `Anonymous · ${j.visitorId.slice(0, 6)}`;
                           const sub    = j.company || j.email;
                           return (
@@ -518,6 +528,31 @@ export function StatsView({
                       </tbody>
                     </table>
                   </div>
+                  {journeys.length > JOURNEYS_PER_PAGE && (
+                    <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-slate-100 flex-wrap">
+                      <span className="text-xs text-slate-400 font-medium">
+                        Showing {pageStart + 1}–{Math.min(pageStart + JOURNEYS_PER_PAGE, journeys.length)} of {journeys.length}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => setJourneyPage(p => Math.max(0, p - 1))}
+                          disabled={page <= 0}
+                          className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 cursor-pointer hover:bg-slate-50 transition-colors active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          ← Prev
+                        </button>
+                        <span className="text-xs font-semibold text-slate-500 px-2 tabular-nums">Page {page + 1} / {totalPages}</span>
+                        <button
+                          onClick={() => setJourneyPage(p => Math.min(totalPages - 1, p + 1))}
+                          disabled={page >= totalPages - 1}
+                          className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 cursor-pointer hover:bg-slate-50 transition-colors active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          Next →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  </>
                 )}
               </div>
             );
@@ -544,6 +579,9 @@ export default function EventDashboard({
   // ── State ──────────────────────────────────────────────────────────────────
 
   const [events,          setEvents]          = useState<EventMeta[]>(eventsList);
+  // True until the first events fetch resolves — avoids flashing the "No events yet"
+  // empty state (with its Create button) before the real list has loaded.
+  const [isLoadingEvents, setIsLoadingEvents] = useState(eventsList.length === 0);
   const [showCreateForm,  setShowCreateForm]  = useState(false);
   const [newEventName,    setNewEventName]    = useState('');
   const [newEventSlug,    setNewEventSlug]    = useState('');
@@ -566,9 +604,11 @@ export default function EventDashboard({
   // ── Mount: refresh list + access requests ─────────────────────────────────
 
   useEffect(() => {
+    setIsLoadingEvents(true);
     getEventsList()
       .then(list => setEvents(list))
-      .catch(() => { /* silently keep props-seeded list */ });
+      .catch(() => { /* silently keep props-seeded list */ })
+      .finally(() => setIsLoadingEvents(false));
 
     if (adminEmail) {
       setIsLoadingAccess(true);
@@ -858,8 +898,19 @@ export default function EventDashboard({
               </div>
             )}
 
-            {/* Empty state */}
-            {visibleEvents.length === 0 && !showCreateForm && (
+            {/* Loading state — first events fetch in flight */}
+            {isLoadingEvents && visibleEvents.length === 0 && !showCreateForm && (
+              <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
+                <Loader size={30} className="animate-spin text-violet-500" />
+                <div>
+                  <p className="text-slate-700 font-bold text-base">Loading your events…</p>
+                  <p className="text-slate-400 text-sm mt-1">Fetching everything you've set up.</p>
+                </div>
+              </div>
+            )}
+
+            {/* Empty state — only after loading finishes */}
+            {!isLoadingEvents && visibleEvents.length === 0 && !showCreateForm && (
               <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
                 <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center">
                   <BarChart2 size={28} className="text-slate-300" />

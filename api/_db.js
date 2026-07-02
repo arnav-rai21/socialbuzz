@@ -33,6 +33,7 @@ export async function ensureTables() {
       updated_at           TIMESTAMPTZ DEFAULT NOW()
     )`;
   await sql`ALTER TABLE events_config ADD COLUMN IF NOT EXISTS field_settings JSONB`;
+  await sql`ALTER TABLE events_config ADD COLUMN IF NOT EXISTS photo_tools_settings JSONB`;
 
   // ── Multi-template: one row per template, many per event slug ──────────────
   await sql`

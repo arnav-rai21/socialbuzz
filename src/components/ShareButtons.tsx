@@ -170,7 +170,8 @@ export default function ShareButtons({
   // Open modal for a platform
   function openModal(key: PlatformKey) {
     setActivePlatform(key);
-    setCaption(ss.defaultCaption || '');
+    // X caps posts at 280 chars — prefer the admin's dedicated X caption when set.
+    setCaption((key === 'x' && ss.xCaption) ? ss.xCaption : (ss.defaultCaption || ''));
     setHashtags(ss.defaultHashtags || '');
     setLiPhase('idle');
     setLiError('');

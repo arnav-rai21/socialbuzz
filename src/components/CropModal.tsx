@@ -11,13 +11,15 @@ interface CropModalProps {
   open: boolean;
   imageSrc: string;
   slot: ImageSlot;
-  /** Remove-bg / Enhance are Pro features — hidden unless the event owner is on Pro. */
-  cutoutEnabled?: boolean;
+  /** Remove-bg / Enhance are Pro features, each independently switchable per event
+   *  from the backend's Photo Tools section. A tool's button is hidden when off. */
+  removeBgEnabled?: boolean;
+  enhanceEnabled?:  boolean;
   onApply: (croppedDataUrl: string) => void;
   onClose: () => void;
 }
 
-export default function CropModal({ open, imageSrc, slot, cutoutEnabled = true, onApply, onClose }: CropModalProps) {
+export default function CropModal({ open, imageSrc, slot, removeBgEnabled = true, enhanceEnabled = true, onApply, onClose }: CropModalProps) {
   const cropperRef = useRef<any>(null);
 
   // The image currently shown in the cropper. Starts as the uploaded photo and
@@ -35,6 +37,7 @@ export default function CropModal({ open, imageSrc, slot, cutoutEnabled = true, 
 
   const aspectRatio = slot.width && slot.height ? slot.width / slot.height : 1;
   const isOriginal  = workingSrc === imageSrc;
+  const showTools   = removeBgEnabled || enhanceEnabled;
 
   function handleApply() {
     const cropper = cropperRef.current?.cropper;
@@ -147,9 +150,10 @@ export default function CropModal({ open, imageSrc, slot, cutoutEnabled = true, 
               )}
             </div>
 
-            {/* AI photo tools (Pro only) */}
-            {cutoutEnabled && (
+            {/* AI photo tools (Pro; each togglable per event) */}
+            {showTools && (
             <div className="flex gap-2">
+              {removeBgEnabled && (
               <button
                 onClick={() => runProcess('bg')}
                 disabled={!!processing || bgRemoved}
@@ -158,6 +162,8 @@ export default function CropModal({ open, imageSrc, slot, cutoutEnabled = true, 
               >
                 <Scissors size={14} /> {bgRemoved ? 'Background removed' : 'Remove background'}
               </button>
+              )}
+              {enhanceEnabled && (
               <button
                 onClick={() => runProcess('enhance')}
                 disabled={!!processing}
@@ -166,6 +172,7 @@ export default function CropModal({ open, imageSrc, slot, cutoutEnabled = true, 
               >
                 <Sparkles size={14} /> Enhance
               </button>
+              )}
               {!isOriginal && (
                 <button
                   onClick={resetToOriginal}

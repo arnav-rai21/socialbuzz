@@ -30,16 +30,17 @@ import MarketingPage from './components/MarketingPage';
 import CanvasPreview from './components/CanvasPreview';
 import CropModal from './components/CropModal';
 import EventDashboard, { StatsView } from './components/EventDashboard';
+import EventEditor from './components/EventEditor';
 import ImageUpload from './components/ImageUpload';
 import ShareButtons from './components/ShareButtons';
 import TemplateGallery from './components/TemplateGallery';
 import UserForm from './components/UserForm';
 
-import { GOOGLE_CLIENT_ID, IS_GAS, IS_GAS_ADMIN, INITIAL_EVENT_SLUG, INITIAL_MODE, DEFAULT_SLOT, buildWidgetSnippet, callDeleteActivity, callDeleteEvent, callDeleteTemplate, callGetEventStats, callIdentifyVisitor, callLogOpen, callSaveTemplate, callUploadImage, clearVisitorIdentity, getVisitorIdentity, setVisitorIdentity, loadBootstrap, loadBootstrapAsync } from './lib/server';
+import { GOOGLE_CLIENT_ID, IS_GAS, IS_GAS_ADMIN, INITIAL_EVENT_SLUG, INITIAL_MODE, DEFAULT_SLOT, buildWidgetSnippet, callDeleteActivity, callDeleteEvent, callDeleteTemplate, callGetEventStats, callIdentifyVisitor, callLogOpen, callRenameEvent, callSaveEventSettings, callSaveTemplate, callUploadImage, clearVisitorIdentity, getVisitorIdentity, setVisitorIdentity, loadBootstrap, loadBootstrapAsync } from './lib/server';
 import type { VisitorIdentity } from './lib/server';
 import { promptOneTap, disableOneTapAutoSelect } from './lib/googleOneTap';
-import type { EventMeta, EventStats, FieldSettings, FontSettings, GeneratedAsset, ImageSlot, SharingSettings, TemplateConfig, TextSlot, UserProfile } from './types';
-import { DEFAULT_FIELD_SETTINGS, DEFAULT_FONT_SETTINGS, DEFAULT_SHARING_SETTINGS } from './types';
+import type { EventMeta, EventStats, FieldSettings, FontSettings, GeneratedAsset, ImageSlot, PhotoToolsSettings, SharingSettings, TemplateConfig, TextSlot, UserProfile } from './types';
+import { DEFAULT_FIELD_SETTINGS, DEFAULT_FONT_SETTINGS, DEFAULT_PHOTO_TOOLS_SETTINGS, DEFAULT_SHARING_SETTINGS } from './types';
 
 const initialTemplate = loadBootstrap();
 
@@ -103,6 +104,11 @@ export default function App() {
   // sharing & field settings are event-level (shared by all templates).
   const [sharingSettings, setSharingSettings]           = useState<SharingSettings>(initialTemplate.sharingSettings || DEFAULT_SHARING_SETTINGS);
   const [fieldSettings,   setFieldSettings]             = useState<FieldSettings>(initialTemplate.fieldSettings   || DEFAULT_FIELD_SETTINGS);
+  const [photoToolsSettings, setPhotoToolsSettings]     = useState<PhotoToolsSettings>(initialTemplate.photoToolsSettings || DEFAULT_PHOTO_TOOLS_SETTINGS);
+  // True while the initial (or on-event-switch) bootstrap fetch is in flight — the
+  // attendee widget shows a loading state instead of a blank/unconfigured template.
+  const [templatesLoading, setTemplatesLoading]         = useState(true);
+  const [isSavingSettings, setIsSavingSettings]         = useState(false);
   const [userRawDataUrl,     setUserRawDataUrl]         = useState('');
   const [userCroppedDataUrl, setUserCroppedDataUrl]     = useState('');
   const [cropModalOpen,      setCropModalOpen]          = useState(false);
@@ -164,7 +170,7 @@ export default function App() {
 
   // ── Multi-event state ─────────────────────────────────────────────────────
   const [eventSlug, setEventSlug] = useState(INITIAL_EVENT_SLUG);
-  const [appMode,   setAppMode]   = useState<'app' | 'admin-dashboard'>(
+  const [appMode,   setAppMode]   = useState<'app' | 'admin-dashboard' | 'event-editor'>(
     _savedAuth ? 'admin-dashboard' : 'app'
   );
   const [eventsList, setEventsList] = useState<EventMeta[]>([]);
@@ -188,6 +194,7 @@ export default function App() {
 
   // Fetch bootstrap data from /api/bootstrap on mount
   useEffect(() => {
+    setTemplatesLoading(true);
     loadBootstrapAsync(eventSlug).then(data => {
       if (!data) return;
       // Prefer the templates[] array; fall back to the single templateConfig for old responses.
@@ -200,12 +207,14 @@ export default function App() {
 
       const sharing = data.sharingSettings ?? data.templateConfig?.sharingSettings;
       const fields  = data.fieldSettings   ?? data.templateConfig?.fieldSettings;
+      const photo   = data.photoToolsSettings ?? data.templateConfig?.photoToolsSettings;
       if (sharing) setSharingSettings(sharing);
       if (fields)  setFieldSettings(fields);
+      if (photo)   setPhotoToolsSettings(photo);
 
       if (data.eventPlan) setEventPlan(data.eventPlan);
       if (Array.isArray(data.eventsList)) setEventsList(data.eventsList);
-    });
+    }).finally(() => setTemplatesLoading(false));
     // Re-fetch whenever the event being edited/viewed changes (e.g. switching
     // events from the admin dashboard), otherwise the template list stays stale.
   }, [eventSlug]);
@@ -428,7 +437,7 @@ export default function App() {
     const prevKey = keyOf(t);
     const payloadTextSlot = t.textSlot; // capture before async
     callSaveTemplate(
-      { templateId: t.id, fileName: t.templateName || `template_${Date.now()}.png`, templateDataUrl: dataUrl, imageSlot: t.imageSlot, textSlot: payloadTextSlot, eventSlug, fontSettings: t.fontSettings || activeFont, sharingSettings, fieldSettings },
+      { templateId: t.id, fileName: t.templateName || `template_${Date.now()}.png`, templateDataUrl: dataUrl, imageSlot: t.imageSlot, textSlot: payloadTextSlot, eventSlug, fontSettings: t.fontSettings || activeFont, sharingSettings, fieldSettings, photoToolsSettings },
       (config) => {
         // Server may omit textSlot when the image re-fetch fails on load-back; preserve what was just saved.
         const merged: TemplateConfig = { ...config, textSlot: config.textSlot ?? payloadTextSlot };
@@ -437,8 +446,9 @@ export default function App() {
           return [...others, merged].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
         });
         setActiveKey(keyOf(merged));
-        if (config.sharingSettings) setSharingSettings(config.sharingSettings);
-        if (config.fieldSettings)   setFieldSettings(config.fieldSettings);
+        if (config.sharingSettings)    setSharingSettings(config.sharingSettings);
+        if (config.fieldSettings)      setFieldSettings(config.fieldSettings);
+        if (config.photoToolsSettings) setPhotoToolsSettings(config.photoToolsSettings);
         setTemplateUploadDataUrl('');
         setIsSavingTemplate(false);
         setIsMappingMode(false);
@@ -446,6 +456,29 @@ export default function App() {
         toast.success('Template & settings saved!');
       },
       (err) => { setIsSavingTemplate(false); if (!isUpgradeError(err)) toast.error(`Save failed: ${(err as Error)?.message ?? err}`); }
+    );
+  }
+
+  // Rename the current event. Updates the shared events list so the new name
+  // shows everywhere (top bar, switcher, dashboard). onDone always fires so the
+  // caller can clear its saving state on success or failure.
+  function handleRenameEvent(name: string, onDone?: () => void) {
+    callRenameEvent(
+      eventSlug, name,
+      (r) => { setEventsList(prev => prev.map(e => e.slug === r.slug ? { ...e, name: r.name } : e)); toast.success('Event renamed.'); onDone?.(); },
+      (err) => { toast.error(`Rename failed: ${(err as Error)?.message ?? err}`); onDone?.(); },
+    );
+  }
+
+  // Persist event-level settings (Sharing / Form Fields / Photo Tools) without a
+  // template — used by the backend editor's "Save changes" on non-design sections.
+  function handleSaveEventSettings(onDone?: () => void) {
+    setIsSavingSettings(true);
+    callSaveEventSettings(
+      eventSlug,
+      { sharingSettings, fieldSettings, photoToolsSettings },
+      () => { setIsSavingSettings(false); toast.success('Changes saved!'); onDone?.(); },
+      (err) => { setIsSavingSettings(false); if (!isUpgradeError(err)) toast.error(`Save failed: ${(err as Error)?.message ?? err}`); }
     );
   }
 
@@ -645,14 +678,71 @@ export default function App() {
           onUpgrade={() => setShowUpgrade(true)}
           onEditEvent={(slug) => {
             setEventSlug(slug);
-            setAppMode('app');
-            setIsAdminOpen(true);
-            setEditorSection('template');
+            setAppMode('event-editor');
             setEditStats(null);
             setConfirmDeleteEvent(false);
           }}
           onClose={() => setAppMode('app')}
           onLogout={handleLogout}
+        />
+        {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} />}
+      </>
+    );
+  }
+
+  // Full-screen backend editor — sidebar workspace for configuring one event.
+  if (appMode === 'event-editor' && isAdminAuthenticated) {
+    const eventName = eventsList.find(e => e.slug === eventSlug)?.name || eventSlug;
+    return (
+      <>
+        <EventEditor
+          eventSlug={eventSlug}
+          eventName={eventName}
+          eventsList={eventsList}
+          plan={adminPlan}
+          isPro={isPro}
+          templatesLoading={templatesLoading}
+          templates={templates}
+          activeKey={activeKey}
+          activeTemplate={activeTemplate}
+          activeFont={activeFont}
+          profile={profile}
+          userCroppedDataUrl={userCroppedDataUrl}
+          isMappingMode={isMappingMode}
+          isTextMappingMode={isTextMappingMode}
+          isSaving={isSavingTemplate || isSavingSettings}
+          sharingSettings={sharingSettings}
+          fieldSettings={fieldSettings}
+          photoToolsSettings={photoToolsSettings}
+          editStats={editStats}
+          editStatsLoading={editStatsLoading}
+          isDeletingEvent={isDeletingEvent}
+          onSwitchEvent={(slug) => { setEventSlug(slug); setEditStats(null); setConfirmDeleteEvent(false); }}
+          onBackToDashboard={() => setAppMode('admin-dashboard')}
+          onOpenLiveEvent={() => { setIsAdminOpen(false); setAppMode('app'); }}
+          onUpgrade={() => setShowUpgrade(true)}
+          onTemplateLoad={handleTemplateLoad}
+          onSelectTemplate={handleSelectTemplate}
+          onDeleteTemplate={handleDeleteTemplate}
+          onSlotChange={handleSlotChange}
+          onClearPhotoSlot={handleClearPhotoSlot}
+          onTextSlotChange={handleTextSlotChange}
+          onToggleMapping={handleToggleMapping}
+          onToggleTextMapping={handleToggleTextMapping}
+          onFontChange={handleFontChange}
+          onSaveTemplate={handleSaveMapping}
+          onSharingChange={setSharingSettings}
+          onFieldSettingsChange={setFieldSettings}
+          onPhotoToolsChange={setPhotoToolsSettings}
+          onSaveEventSettings={handleSaveEventSettings}
+          onRenameEvent={handleRenameEvent}
+          onLoadStats={loadEditStats}
+          onDeleteActivity={(visitorId) => callDeleteActivity(
+            eventSlug, visitorId,
+            (r) => { toast.success(visitorId ? 'Entry deleted.' : `Cleared ${r.deleted} record${r.deleted === 1 ? '' : 's'}.`); loadEditStats(eventSlug); },
+            (err) => toast.error(`Delete failed: ${(err as Error)?.message ?? err}`),
+          )}
+          onDeleteEvent={handleDeleteCurrentEvent}
         />
         {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} />}
       </>
@@ -909,6 +999,20 @@ export default function App() {
             );
           })()}
         </div>
+      ) : templatesLoading ? (
+      /* Loading state — shown while the event's templates/config are still loading,
+         so attendees never see a blank, unconfigured template flash first. */
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 py-24 text-center">
+        <div className="relative w-14 h-14">
+          <span className="absolute inset-0 rounded-full border-[3px] border-violet-100" />
+          <span className="absolute inset-0 rounded-full border-[3px] border-transparent border-t-violet-600 animate-spin" />
+          <Sparkles size={20} className="absolute inset-0 m-auto text-violet-500" />
+        </div>
+        <div>
+          <p className="text-base font-black text-slate-800">Loading your event…</p>
+          <p className="text-sm text-slate-400 mt-1">Setting up templates and details.</p>
+        </div>
+      </div>
       ) : (
       /* Main content — two-column on desktop */
       <div className="flex-1 flex flex-col lg:flex-row" style={{ minHeight: 0 }}>
@@ -1220,7 +1324,7 @@ export default function App() {
       )}{/* end two-column layout / section panels */}
 
       {/* Bottom CTA — only shown on form view (mobile only; desktop has button in right column) */}
-      {currentView === 'form' && !(isAdminActive && editorSection !== 'template') && (
+      {currentView === 'form' && !templatesLoading && !(isAdminActive && editorSection !== 'template') && (
         <div className="lg:hidden sticky bottom-0 z-10 bg-white border-t border-slate-100 px-4 py-3 sm:px-5" style={{ paddingBottom: 'calc(0.75rem + var(--safe-bottom))' }}>
           <button
             onClick={() => handleGenerate()}
@@ -1245,7 +1349,15 @@ export default function App() {
       {/* Modals */}
       {showAdminLogin && <AdminLogin onAuthenticated={handleAuthenticated} onClose={() => setShowAdminLogin(false)} />}
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} />}
-      <CropModal open={cropModalOpen} imageSrc={userRawDataUrl} slot={activeTemplate.imageSlot} cutoutEnabled={eventPlan === 'pro'} onApply={handleCropApply} onClose={() => setCropModalOpen(false)} />
+      <CropModal
+        open={cropModalOpen}
+        imageSrc={userRawDataUrl}
+        slot={activeTemplate.imageSlot}
+        removeBgEnabled={eventPlan === 'pro' && photoToolsSettings.removeBgEnabled}
+        enhanceEnabled={eventPlan === 'pro' && photoToolsSettings.enhanceEnabled}
+        onApply={handleCropApply}
+        onClose={() => setCropModalOpen(false)}
+      />
 
       {/* Hidden file inputs */}
       <input ref={galleryInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"

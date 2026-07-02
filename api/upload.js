@@ -76,6 +76,20 @@ async function callCutout(url, apiKey, buffer, timeoutMs) {
   }
 }
 
+// Event-level attendee photo-tool toggles (default: both enabled). Never throws.
+async function getPhotoToolsSettings(slug) {
+  try {
+    const { rows } = await sql`SELECT photo_tools_settings FROM events_config WHERE slug = ${slug}`;
+    const s = rows[0]?.photo_tools_settings;
+    return {
+      removeBgEnabled: s?.removeBgEnabled !== false,
+      enhanceEnabled:  s?.enhanceEnabled  !== false,
+    };
+  } catch {
+    return { removeBgEnabled: true, enhanceEnabled: true };
+  }
+}
+
 async function handleRemoveBackground(req, res) {
   const keys = getCutoutKeys();
   if (!keys.length) throw new Error('Background removal is not configured. Add CUTOUT_PRO_API_KEY to env vars.');
@@ -83,9 +97,19 @@ async function handleRemoveBackground(req, res) {
   const { base64Data, op, eventSlug } = req.body || {};
   if (!base64Data) throw new Error('No image provided.');
 
+  const slug = eventSlug || 'default';
+
   // Pro feature: remove-bg / enhance allowed only on a Pro owner's event.
-  if (await getEventOwnerPlan(eventSlug || 'default') === 'free') {
+  if (await getEventOwnerPlan(slug) === 'free') {
     throw new Error('UPGRADE_REQUIRED: Remove background & Enhance are Pro features. Upgrade to Pro to enable them.');
+  }
+
+  // Per-event admin toggle: even on Pro, an op is only allowed if the event owner
+  // left it enabled in the backend's Photo Tools section (default: both on).
+  const toggles = await getPhotoToolsSettings(slug);
+  const isEnhance = op === 'enhance';
+  if (isEnhance ? toggles.enhanceEnabled === false : toggles.removeBgEnabled === false) {
+    throw new Error(`TOOL_DISABLED: ${isEnhance ? 'Enhance' : 'Remove background'} is turned off for this event.`);
   }
 
   const raw = String(base64Data).replace(/^data:image\/[^;]+;base64,/, '');

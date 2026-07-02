@@ -36,11 +36,30 @@ export const DEFAULT_FONT_SETTINGS: FontSettings = {
 export interface SharingSettings {
   defaultCaption:  string;
   defaultHashtags: string;
+  /** Optional shorter caption used only on X (Twitter), which caps posts at 280 chars. */
+  xCaption?:       string;
 }
 
 export const DEFAULT_SHARING_SETTINGS: SharingSettings = {
   defaultCaption:  '',
   defaultHashtags: '',
+  xCaption:        '',
+};
+
+// X (Twitter) post length limit — used to warn admins when the default caption is too long.
+export const X_CHAR_LIMIT = 280;
+
+// Event-level toggles for the attendee-facing AI photo tools (Pro features).
+// When off, the corresponding button is hidden in the crop modal and the
+// server rejects the operation even if the owner is on Pro.
+export interface PhotoToolsSettings {
+  removeBgEnabled: boolean;
+  enhanceEnabled:  boolean;
+}
+
+export const DEFAULT_PHOTO_TOOLS_SETTINGS: PhotoToolsSettings = {
+  removeBgEnabled: true,
+  enhanceEnabled:  true,
 };
 
 export interface FieldConfig {
@@ -76,8 +95,9 @@ export interface TemplateConfig {
   error?:           string;
   fontSettings?:    FontSettings;
   // Event-level settings — present on the bootstrap default template for back-compat.
-  sharingSettings?: SharingSettings;
-  fieldSettings?:   FieldSettings;
+  sharingSettings?:    SharingSettings;
+  fieldSettings?:      FieldSettings;
+  photoToolsSettings?: PhotoToolsSettings;
 }
 
 export interface GeneratedAsset {

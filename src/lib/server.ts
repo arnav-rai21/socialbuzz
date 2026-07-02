@@ -2,6 +2,7 @@ import type {
   FontSettings,
   GeneratedAsset,
   ImageSlot,
+  PhotoToolsSettings,
   SharingSettings,
   TemplateConfig,
   UserProfile,
@@ -120,12 +121,14 @@ function getAdminEmail(): string {
 const ACTION_ROUTES: Record<string, string> = {
   saveTemplate:          '/api/template',
   deleteTemplate:        '/api/template',
+  saveEventSettings:     '/api/template',
   cutout:                '/api/upload',
   uploadImage:           '/api/upload',
   logShare:              '/api/log-share',
   identifyVisitor:       '/api/log-share',
   getEventsList:         '/api/events',
   createEvent:           '/api/events',
+  renameEvent:           '/api/events',
   deleteEvent:           '/api/events',
   deleteActivity:        '/api/events',
   getEventStats:         '/api/stats',
@@ -181,6 +184,7 @@ export async function loadBootstrapAsync(eventSlug: string): Promise<{
   templates?:          TemplateConfig[];
   sharingSettings?:    SharingSettings | null;
   fieldSettings?:      import('../types').FieldSettings | null;
+  photoToolsSettings?: PhotoToolsSettings | null;
   adminEmail:          string;
   eventsList?:         import('../types').EventMeta[];
   linkedInRedirectUri?: string;
@@ -212,6 +216,7 @@ export interface SaveTemplatePayload {
   fontSettings?:    FontSettings;
   sharingSettings?: SharingSettings;
   fieldSettings?:   import('../types').FieldSettings;
+  photoToolsSettings?: PhotoToolsSettings;
   eventSlug:        string;
 }
 
@@ -232,6 +237,25 @@ export function callDeleteTemplate(
   onFailure:  (err: Error | string) => void
 ): void {
   callApi<{ success: boolean }>({ action: 'deleteTemplate', eventSlug, templateId })
+    .then(onSuccess)
+    .catch(onFailure);
+}
+
+// Persist event-level settings (sharing / fields / photo tools) without a template.
+// Powers the backend "Save changes" button for Sharing / Form Fields / Photo Tools.
+export interface EventSettingsPayload {
+  sharingSettings?:    SharingSettings;
+  fieldSettings?:      import('../types').FieldSettings;
+  photoToolsSettings?: PhotoToolsSettings;
+}
+
+export function callSaveEventSettings(
+  eventSlug: string,
+  payload:   EventSettingsPayload,
+  onSuccess: (result: { success: boolean }) => void,
+  onFailure: (err: Error | string) => void
+): void {
+  callApi<{ success: boolean }>({ action: 'saveEventSettings', eventSlug, payload })
     .then(onSuccess)
     .catch(onFailure);
 }
@@ -329,6 +353,19 @@ export function callCreateEvent(
   onFailure: (err: Error | string) => void
 ): void {
   callApi<{ success: boolean; slug: string; name: string }>({ action: 'createEvent', slug, name, adminEmail: getAdminEmail() })
+    .then(onSuccess)
+    .catch(onFailure);
+}
+
+// ── Rename event ───────────────────────────────────────────────────────────────
+
+export function callRenameEvent(
+  slug:      string,
+  name:      string,
+  onSuccess: (result: { success: boolean; slug: string; name: string }) => void,
+  onFailure: (err: Error | string) => void
+): void {
+  callApi<{ success: boolean; slug: string; name: string }>({ action: 'renameEvent', slug, name, adminEmail: getAdminEmail() })
     .then(onSuccess)
     .catch(onFailure);
 }

@@ -49,12 +49,13 @@ async function loadEventData(slug) {
   }
 
   // Event-level settings shared across templates.
-  let sharingSettings = null, fieldSettings = null;
+  let sharingSettings = null, fieldSettings = null, photoToolsSettings = null;
   const { rows: cfgRows } = await sql`SELECT * FROM events_config WHERE slug = ${slug}`;
   const cfg = cfgRows[0];
   if (cfg) {
-    sharingSettings = cfg.sharing_settings || null;
-    fieldSettings   = cfg.field_settings   || null;
+    sharingSettings    = cfg.sharing_settings      || null;
+    fieldSettings      = cfg.field_settings        || null;
+    photoToolsSettings = cfg.photo_tools_settings  || null;
   }
 
   // Safety net: if no rows came from event_templates yet (e.g. the migration
@@ -78,7 +79,7 @@ async function loadEventData(slug) {
     } catch { /* legacy image unreachable — leave templates empty */ }
   }
 
-  return { templates, sharingSettings, fieldSettings };
+  return { templates, sharingSettings, fieldSettings, photoToolsSettings };
 }
 
 export default async function handler(req, res) {
@@ -90,14 +91,15 @@ export default async function handler(req, res) {
     const eventSlug = req.query.event || 'default';
     const mode      = req.query.mode  || '';
 
-    const { templates, sharingSettings, fieldSettings } = await loadEventData(eventSlug);
+    const { templates, sharingSettings, fieldSettings, photoToolsSettings } = await loadEventData(eventSlug);
     const defaultTemplate = templates.find(t => t.isDefault) || templates[0] || EMPTY_TEMPLATE;
     const LINKEDIN_REDIRECT = process.env.LINKEDIN_REDIRECT_URI || `${APP_BASE_URL}/api/linkedin-callback`;
 
     // Back-compat single template: attach event-level settings onto it for old clients.
     const templateConfig = { ...defaultTemplate };
-    if (sharingSettings) templateConfig.sharingSettings = sharingSettings;
-    if (fieldSettings)   templateConfig.fieldSettings   = fieldSettings;
+    if (sharingSettings)    templateConfig.sharingSettings    = sharingSettings;
+    if (fieldSettings)      templateConfig.fieldSettings      = fieldSettings;
+    if (photoToolsSettings) templateConfig.photoToolsSettings = photoToolsSettings;
 
     const data = {
       userEmail:           '',
@@ -109,6 +111,7 @@ export default async function handler(req, res) {
       templates,                      // all enabled templates for the event
       sharingSettings,                // event-level
       fieldSettings,                  // event-level
+      photoToolsSettings,             // event-level (attendee AI photo tools on/off)
       linkedInRedirectUri: LINKEDIN_REDIRECT,
       googleClientId:      process.env.GOOGLE_CLIENT_ID    || '',
       googleRedirectUri:   process.env.GOOGLE_REDIRECT_URI || `${APP_BASE_URL}/api/google-callback`,

@@ -38,19 +38,21 @@ function toTemplateConfig(row, templateDataUrl) {
 }
 
 // Persist event-level settings (shared by all templates of the event).
-async function saveEventSettings(slug, sharingSettings, fieldSettings) {
+async function saveEventSettings(slug, sharingSettings, fieldSettings, photoToolsSettings) {
   await sql`
-    INSERT INTO events_config (slug, sharing_settings, field_settings, updated_at)
+    INSERT INTO events_config (slug, sharing_settings, field_settings, photo_tools_settings, updated_at)
     VALUES (
       ${slug},
-      ${sharingSettings ? JSON.stringify(sharingSettings) : null},
-      ${fieldSettings   ? JSON.stringify(fieldSettings)   : null},
+      ${sharingSettings    ? JSON.stringify(sharingSettings)    : null},
+      ${fieldSettings      ? JSON.stringify(fieldSettings)      : null},
+      ${photoToolsSettings ? JSON.stringify(photoToolsSettings) : null},
       NOW()
     )
     ON CONFLICT (slug) DO UPDATE SET
-      sharing_settings = COALESCE(EXCLUDED.sharing_settings, events_config.sharing_settings),
-      field_settings   = COALESCE(EXCLUDED.field_settings,   events_config.field_settings),
-      updated_at       = NOW()`;
+      sharing_settings     = COALESCE(EXCLUDED.sharing_settings,     events_config.sharing_settings),
+      field_settings       = COALESCE(EXCLUDED.field_settings,       events_config.field_settings),
+      photo_tools_settings = COALESCE(EXCLUDED.photo_tools_settings, events_config.photo_tools_settings),
+      updated_at           = NOW()`;
 }
 
 async function touchEvent(slug) {
@@ -136,14 +138,31 @@ async function saveTemplate(payload) {
     row = withImg[0];
   }
 
-  await saveEventSettings(slug, payload.sharingSettings, payload.fieldSettings);
+  await saveEventSettings(slug, payload.sharingSettings, payload.fieldSettings, payload.photoToolsSettings);
   await touchEvent(slug);
 
   // Return saved config immediately from the payload data url — avoids a slow S3 round-trip.
   const cfg = toTemplateConfig(row, payload.templateDataUrl);
-  if (payload.sharingSettings) cfg.sharingSettings = payload.sharingSettings;
-  if (payload.fieldSettings)   cfg.fieldSettings   = payload.fieldSettings;
+  if (payload.sharingSettings)    cfg.sharingSettings    = payload.sharingSettings;
+  if (payload.fieldSettings)      cfg.fieldSettings      = payload.fieldSettings;
+  if (payload.photoToolsSettings) cfg.photoToolsSettings = payload.photoToolsSettings;
   return cfg;
+}
+
+// ── saveEventSettings ────────────────────────────────────────────────────────
+// Persist event-level settings (sharing / fields / photo tools) without touching
+// any template — lets the backend "Save changes" work even before a template
+// exists, and for sections (Sharing, Form Fields, Photo Tools) that don't map a slot.
+async function saveEventSettingsOnly(slug, payload) {
+  if (!isValidSlug(slug)) throw new Error('Invalid event slug.');
+  await saveEventSettings(slug, payload?.sharingSettings, payload?.fieldSettings, payload?.photoToolsSettings);
+  await touchEvent(slug);
+  return {
+    success:            true,
+    sharingSettings:    payload?.sharingSettings    ?? null,
+    fieldSettings:      payload?.fieldSettings      ?? null,
+    photoToolsSettings: payload?.photoToolsSettings ?? null,
+  };
 }
 
 // ── deleteTemplate ─────────────────────────────────────────────────────────
@@ -184,6 +203,10 @@ export default async function handler(req, res) {
     }
     if (action === 'deleteTemplate') {
       const data = await deleteTemplate(body.eventSlug || 'default', body.templateId);
+      return res.status(200).json({ success: true, data });
+    }
+    if (action === 'saveEventSettings') {
+      const data = await saveEventSettingsOnly(body.eventSlug || 'default', body.payload);
       return res.status(200).json({ success: true, data });
     }
     return res.status(400).json({ success: false, error: 'Unknown action' });

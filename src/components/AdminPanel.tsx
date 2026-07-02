@@ -31,6 +31,12 @@ interface AdminPanelProps {
   onFieldSettingsChange: (s: FieldSettings) => void;
   eventSlug?:          string;
   onViewDashboard?:    () => void;
+  // Section visibility — the sidebar backend renders Sharing / Form Fields / Save
+  // as their own pages, so it hides them here and reuses only the design controls.
+  showHeader?:         boolean;
+  showSharing?:        boolean;
+  showFields?:         boolean;
+  showSave?:           boolean;
 }
 
 // Stable client key for a template: its DB id, or 'new' for an unsaved draft.
@@ -53,6 +59,7 @@ export default function AdminPanel({
   onTemplateLoad, onSelectTemplate, onDeleteTemplate, onSlotChange, onTextSlotChange, onSaveMapping, onToggleMapping, onToggleTextMapping,
   onFontChange, onSharingChange, onFieldSettingsChange,
   eventSlug, onViewDashboard,
+  showHeader = true, showSharing = true, showFields = true, showSave = true,
 }: AdminPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -104,6 +111,7 @@ export default function AdminPanel({
           <div className="flex flex-col gap-5 pt-1">
 
             {/* Header: back link + event slug badge */}
+            {showHeader && (
             <div className="flex items-center justify-between">
               {onViewDashboard && (
                 <button
@@ -118,6 +126,7 @@ export default function AdminPanel({
                 Editing: {eventSlug || 'default'}
               </span>
             </div>
+            )}
 
             {/* Templates strip — pick which template to edit, add or delete */}
             <div>
@@ -385,6 +394,7 @@ export default function AdminPanel({
             </div>
 
             {/* Caption & hashtags */}
+            {showSharing && (
             <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 flex flex-col gap-3">
               <SectionLabel>Default Caption &amp; Hashtags</SectionLabel>
               <div>
@@ -403,8 +413,10 @@ export default function AdminPanel({
                 <p className="text-xs text-slate-400 mt-1">Automatically appended to every post.</p>
               </div>
             </div>
+            )}
 
             {/* Form Fields */}
+            {showFields && (
             <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 flex flex-col gap-3">
               <SectionLabel>Form Fields</SectionLabel>
               <p className="text-xs text-slate-400 -mt-1">Choose which fields attendees fill in when creating their banner.</p>
@@ -457,13 +469,15 @@ export default function AdminPanel({
                 })}
               </div>
             </div>
+            )}
 
             {/* Save */}
-            {imageSlotSet === false && (
+            {showSave && imageSlotSet === false && (
               <p className="text-xs font-semibold text-amber-600 -mb-2 flex items-center gap-1.5">
                 <Crosshair size={13} /> Draw the photo area on the preview before saving.
               </p>
             )}
+            {showSave && (
             <button
               onClick={onSaveMapping}
               disabled={!templateConfig.templateDataUrl || isSavingTemplate || imageSlotSet === false}
@@ -473,6 +487,7 @@ export default function AdminPanel({
                 ? <><Loader size={15} className="animate-spin" /> Saving…</>
                 : <><Save size={16} /> Save Template &amp; Settings</>}
             </button>
+            )}
 
           </div>
         </motion.div>
