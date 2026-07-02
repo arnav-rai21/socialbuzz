@@ -18,11 +18,14 @@ import {
   Loader,
   Lock,
   MessageCircle,
+  Repeat2,
   Save,
   Scissors,
+  Send,
   Settings as SettingsIcon,
   Share2,
   Sparkles,
+  ThumbsUp,
   Trash2,
   Twitter,
   Wand2,
@@ -856,85 +859,101 @@ function SharingSection({ ss, onChange, template }: { ss: SharingSettings; onCha
     : joinCap(caption, hashtags);
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 max-w-6xl mx-auto">
-      {/* Editor */}
-      <div className="flex-1 min-w-0 max-w-2xl">
-        <SectionCard title="Default Caption & Hashtags" desc="Pre-filled for attendees when they share. They can still edit before posting.">
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1.5">Default Caption</label>
-            <textarea
-              value={caption}
-              onChange={(e) => onChange({ ...ss, defaultCaption: e.target.value })}
-              placeholder="Pre-filled caption shown to users when they share…"
-              rows={6}
-              className={inputCls + ' resize-y'}
-            />
-            <div className="flex items-center justify-between mt-1.5 text-xs">
-              <span className="text-slate-400">{caption.length} characters</span>
-              <span className={xOver ? 'text-red-500 font-bold' : 'text-slate-400'}>{xFull.length}/{X_CHAR_LIMIT} for X</span>
+    <div className="max-w-6xl mx-auto">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-7">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+          {/* Left — editor */}
+          <div className="min-w-0 flex flex-col gap-4">
+            <p className="text-xs font-black uppercase tracking-widest text-slate-500">Default Caption &amp; Hashtags</p>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Default Caption</label>
+              <textarea
+                value={caption}
+                onChange={(e) => onChange({ ...ss, defaultCaption: e.target.value })}
+                placeholder="Pre-filled caption shown to users when they share…"
+                rows={7}
+                className={inputCls + ' resize-y'}
+              />
+              <div className="flex items-center justify-between mt-1.5 text-xs">
+                <span className="text-slate-400">{caption.length} characters</span>
+                <span className={xOver ? 'text-red-500 font-bold' : 'text-slate-400'}>{xFull.length}/{X_CHAR_LIMIT} for X</span>
+              </div>
+            </div>
+
+            {xOver && (
+              <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                <AlertTriangle size={15} className="text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-700">
+                  Your caption is over X's {X_CHAR_LIMIT}-character limit. Add a shorter version below — X will use it instead.
+                </p>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                X Caption <span className="font-normal text-slate-400">(used only for X)</span>
+              </label>
+              <textarea
+                value={xCaption}
+                onChange={(e) => onChange({ ...ss, xCaption: e.target.value })}
+                placeholder="Optional shorter caption for X…"
+                rows={3}
+                className={inputCls + ' resize-y'}
+              />
+              <div className="flex items-center justify-end mt-1.5 text-xs">
+                <span className={xCapLen > X_CHAR_LIMIT ? 'text-red-500 font-bold' : 'text-slate-400'}>{xCapLen}/{X_CHAR_LIMIT}</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Default Hashtags</label>
+              <input
+                type="text"
+                value={hashtags}
+                onChange={(e) => onChange({ ...ss, defaultHashtags: e.target.value })}
+                placeholder="#socialmedia #networking #socialbuzz"
+                className={inputCls}
+              />
+              <p className="text-xs text-slate-400 mt-1">Automatically appended to every post.</p>
             </div>
           </div>
 
-          {xOver && (
-            <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
-              <AlertTriangle size={15} className="text-amber-500 shrink-0 mt-0.5" />
-              <p className="text-xs text-amber-700">
-                Your caption is over X's {X_CHAR_LIMIT}-character limit. Add a shorter version below — X will use it instead.
-              </p>
+          {/* Right — live preview */}
+          <div className="min-w-0">
+            <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
+              <p className="text-xs font-black uppercase tracking-widest text-slate-500">Post Preview</p>
+              <div className="flex flex-wrap gap-1.5">
+                {PREVIEW_PLATFORMS.map(p => {
+                  const active = platform === p.key;
+                  return (
+                    <button key={p.key} onClick={() => setPlatform(p.key)}
+                      style={active ? { background: p.color, borderColor: p.color } : undefined}
+                      className={['flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition-colors',
+                        active ? 'text-white' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'].join(' ')}>
+                      <p.Icon size={13} /> {p.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          )}
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-              X Caption <span className="font-normal text-slate-400">(used only for X)</span>
-            </label>
-            <textarea
-              value={xCaption}
-              onChange={(e) => onChange({ ...ss, xCaption: e.target.value })}
-              placeholder="Optional shorter caption for X…"
-              rows={3}
-              className={inputCls + ' resize-y'}
-            />
-            <div className="flex items-center justify-end mt-1.5 text-xs">
-              <span className={xCapLen > X_CHAR_LIMIT ? 'text-red-500 font-bold' : 'text-slate-400'}>{xCapLen}/{X_CHAR_LIMIT}</span>
-            </div>
+            <PostPreview platform={platform} text={previewText} template={template} />
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1.5">Default Hashtags</label>
-            <input
-              type="text"
-              value={hashtags}
-              onChange={(e) => onChange({ ...ss, defaultHashtags: e.target.value })}
-              placeholder="#socialmedia #networking #socialbuzz"
-              className={inputCls}
-            />
-            <p className="text-xs text-slate-400 mt-1">Automatically appended to every post.</p>
-          </div>
-        </SectionCard>
-      </div>
-
-      {/* Preview */}
-      <div className="lg:w-[380px] flex-shrink-0">
-        <div className="lg:sticky lg:top-0">
-          <p className="text-xs font-black uppercase tracking-widest text-slate-500 mb-3">Post Preview</p>
-          <div className="flex flex-wrap gap-1.5 mb-3">
-            {PREVIEW_PLATFORMS.map(p => {
-              const active = platform === p.key;
-              return (
-                <button key={p.key} onClick={() => setPlatform(p.key)}
-                  className={['flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition-colors',
-                    active ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'].join(' ')}>
-                  <p.Icon size={13} /> {p.label}
-                </button>
-              );
-            })}
-          </div>
-          <PostPreview platform={platform} text={previewText} template={template} />
         </div>
       </div>
     </div>
   );
+}
+
+// Render caption text with LinkedIn-style blue #hashtags and URLs.
+function renderRich(text: string) {
+  return text.split(/(\s+)/).map((tok, i) => {
+    if (/^#[\p{L}\p{N}_-]+/u.test(tok)) return <span key={i} className="text-[#0a66c2] font-medium">{tok}</span>;
+    if (/^https?:\/\//i.test(tok))      return <span key={i} className="text-[#0a66c2] break-all">{tok}</span>;
+    return <span key={i}>{tok}</span>;
+  });
 }
 
 function PostPreview({ platform, text, template }: { platform: PreviewPlatform; text: string; template: TemplateConfig }) {
@@ -972,32 +991,36 @@ function PostPreview({ platform, text, template }: { platform: PreviewPlatform; 
         </div>
         {image}
         <p className="text-[13px] text-slate-800 whitespace-pre-wrap break-words px-3 py-3 leading-snug">
-          <span className="font-bold mr-1.5">your_handle</span>{bodyText}
+          <span className="font-bold mr-1.5">your_handle</span>{renderRich(bodyText)}
         </p>
       </div>
     );
   }
 
   // LinkedIn / X / Facebook — header, caption, image, action bar
-  const header = platform === 'x'
-    ? { name: 'Your Name', sub: '@yourhandle', accent: '#000000' }
+  const meta = platform === 'x'
+    ? { sub: '@yourhandle',            Icon: Twitter,  iconColor: '#000000', repost: 'Repost' }
     : platform === 'facebook'
-      ? { name: 'Your Name', sub: 'Just now', accent: '#1877f2' }
-      : { name: 'Your Name', sub: 'Head of Marketing · now', accent: '#0a66c2' };
+      ? { sub: 'Just now',             Icon: Facebook, iconColor: '#1877f2', repost: 'Share'  }
+      : { sub: 'Head of Marketing · now', Icon: Linkedin, iconColor: '#0a66c2', repost: 'Repost' };
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm">
-      <div className="flex items-center gap-2.5 px-4 pt-4 pb-2">
-        <div className="w-9 h-9 rounded-full flex-shrink-0" style={{ background: `linear-gradient(135deg, ${header.accent}, #a78bfa)` }} />
-        <div className="min-w-0">
-          <p className="text-[13px] font-bold text-slate-900 truncate">{header.name}</p>
-          <p className="text-[11px] text-slate-400 truncate">{header.sub}</p>
+      <div className="flex items-start gap-2.5 px-4 pt-4 pb-2">
+        <div className="w-9 h-9 rounded-full flex-shrink-0" style={{ background: 'linear-gradient(135deg,#a855f7,#ec4899)' }} />
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-bold text-slate-900 truncate">Your Name</p>
+          <p className="text-[11px] text-slate-400 truncate">{meta.sub}</p>
         </div>
+        <meta.Icon size={16} style={{ color: meta.iconColor }} className="flex-shrink-0" />
       </div>
-      <p className="text-[13px] text-slate-800 whitespace-pre-wrap break-words px-4 pb-3 leading-snug">{bodyText}</p>
+      <p className="text-[13px] text-slate-800 whitespace-pre-wrap break-words px-4 pb-3 leading-snug">{renderRich(bodyText)}</p>
       {image}
-      <div className="flex items-center justify-around px-4 py-2.5 border-t border-slate-100 text-[11px] font-semibold text-slate-400">
-        <span>Like</span><span>Comment</span><span>{platform === 'x' ? 'Repost' : 'Share'}</span><span>Send</span>
+      <div className="flex items-center justify-around px-2 py-2.5 border-t border-slate-100 text-[11px] font-semibold text-slate-500">
+        <span className="flex items-center gap-1"><ThumbsUp size={13} /> Like</span>
+        <span className="flex items-center gap-1"><MessageCircle size={13} /> Comment</span>
+        <span className="flex items-center gap-1"><Repeat2 size={13} /> {meta.repost}</span>
+        <span className="flex items-center gap-1"><Send size={13} /> Send</span>
       </div>
     </div>
   );
