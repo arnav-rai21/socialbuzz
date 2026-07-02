@@ -32,6 +32,10 @@ export const INITIAL_MODE: string =
   (new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('mode')) ||
   '';
 
+// The backend event editor lives at the /edit path (e.g. /edit?event=slug).
+export const IS_EDIT_ROUTE: boolean =
+  typeof window !== 'undefined' && /\/edit\/?$/.test(window.location.pathname);
+
 export const DEFAULT_SLOT: ImageSlot = { x: 880, y: 640, width: 520, height: 520, radius: 32 };
 
 // Stable per-browser visitor id (created on first visit) used to stitch together a

@@ -420,7 +420,7 @@ export default function EventEditor(props: EventEditorProps) {
 
               {/* ── Basic Details ── */}
               {section === 'basic' && (
-                <div className="max-w-4xl">
+                <div className="max-w-5xl mx-auto">
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-7 flex flex-col gap-6">
 
                     {/* Row 1: Name + Slug */}
@@ -497,7 +497,7 @@ export default function EventEditor(props: EventEditorProps) {
 
               {/* ── Templates & Design ── */}
               {section === 'design' && (
-                <div className="flex flex-col xl:flex-row gap-6">
+                <div className="flex flex-col xl:flex-row gap-6 max-w-6xl mx-auto">
                   <div className="xl:w-[420px] flex-shrink-0">
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
                       <AdminPanel
@@ -559,7 +559,7 @@ export default function EventEditor(props: EventEditorProps) {
 
               {/* ── Form Fields ── */}
               {section === 'fields' && (
-                <div className="max-w-2xl">
+                <div className="max-w-5xl mx-auto">
                   <SectionCard title="Form Fields" desc="Choose which fields attendees fill in when creating their post.">
                     <FormFieldsEditor fieldSettings={fieldSettings} onChange={onFieldSettingsChange} />
                   </SectionCard>
@@ -573,7 +573,7 @@ export default function EventEditor(props: EventEditorProps) {
 
               {/* ── Photo Tools ── */}
               {section === 'phototools' && (
-                <div className="max-w-2xl flex flex-col gap-5">
+                <div className="max-w-5xl mx-auto flex flex-col gap-5">
                   <SectionCard title="AI Photo Tools" desc="Control which one-tap photo tools attendees can use in the crop step.">
                     {!isPro && (
                       <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-100 rounded-xl p-3 mb-1">
@@ -601,7 +601,7 @@ export default function EventEditor(props: EventEditorProps) {
 
               {/* ── Analytics ── */}
               {section === 'analytics' && (
-                <div className="max-w-5xl">
+                <div className="max-w-6xl mx-auto">
                   {editStatsLoading ? (
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center gap-3 py-20">
                       <Loader size={26} className="animate-spin text-violet-500" />
@@ -619,7 +619,7 @@ export default function EventEditor(props: EventEditorProps) {
 
               {/* ── Share Link ── */}
               {section === 'sharelink' && (
-                <div className="max-w-2xl">
+                <div className="max-w-5xl mx-auto">
                   <SectionCard title="Share & Open" desc="Share this link with attendees, or open the live event page.">
                     <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
                       <code className="text-xs text-slate-600 truncate flex-1">{eventUrl}</code>
@@ -638,7 +638,7 @@ export default function EventEditor(props: EventEditorProps) {
 
               {/* ── Website Widget ── */}
               {section === 'widget' && (
-                <div className="max-w-2xl">
+                <div className="max-w-5xl mx-auto">
                   <SectionCard title="Website Widget" desc="Floating button + popup panel. Paste before </body> on any page.">
                     {!isPro ? (
                       <div className="flex flex-col items-start gap-3 py-4">
@@ -701,7 +701,7 @@ export default function EventEditor(props: EventEditorProps) {
 
               {/* ── Settings (danger zone) ── */}
               {section === 'settings' && (
-                <div className="max-w-2xl">
+                <div className="max-w-5xl mx-auto">
                   <div className="bg-white rounded-2xl border border-red-200 shadow-sm p-6 flex flex-col gap-4">
                     <div>
                       <h3 className="text-base font-black text-red-600">Danger Zone</h3>
@@ -856,7 +856,7 @@ function SharingSection({ ss, onChange, template }: { ss: SharingSettings; onCha
     : joinCap(caption, hashtags);
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6">
+    <div className="flex flex-col lg:flex-row gap-6 max-w-6xl mx-auto">
       {/* Editor */}
       <div className="flex-1 min-w-0 max-w-2xl">
         <SectionCard title="Default Caption & Hashtags" desc="Pre-filled for attendees when they share. They can still edit before posting.">

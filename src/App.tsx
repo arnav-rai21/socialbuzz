@@ -36,7 +36,7 @@ import ShareButtons from './components/ShareButtons';
 import TemplateGallery from './components/TemplateGallery';
 import UserForm from './components/UserForm';
 
-import { GOOGLE_CLIENT_ID, IS_GAS, IS_GAS_ADMIN, INITIAL_EVENT_SLUG, INITIAL_MODE, DEFAULT_SLOT, buildWidgetSnippet, callDeleteActivity, callDeleteEvent, callDeleteTemplate, callGetEventStats, callIdentifyVisitor, callLogOpen, callSaveEventSettings, callSaveTemplate, callUpdateEvent, callUploadImage, clearVisitorIdentity, getVisitorIdentity, setVisitorIdentity, loadBootstrap, loadBootstrapAsync } from './lib/server';
+import { GOOGLE_CLIENT_ID, IS_GAS, IS_GAS_ADMIN, INITIAL_EVENT_SLUG, INITIAL_MODE, IS_EDIT_ROUTE, DEFAULT_SLOT, buildWidgetSnippet, callDeleteActivity, callDeleteEvent, callDeleteTemplate, callGetEventStats, callIdentifyVisitor, callGetEventsList, callLogOpen, callSaveEventSettings, callSaveTemplate, callUpdateEvent, callUploadImage, clearVisitorIdentity, getVisitorIdentity, setVisitorIdentity, loadBootstrap, loadBootstrapAsync } from './lib/server';
 import type { VisitorIdentity } from './lib/server';
 import { promptOneTap, disableOneTapAutoSelect } from './lib/googleOneTap';
 import type { EventMeta, EventStats, FieldSettings, FontSettings, GeneratedAsset, ImageSlot, PhotoToolsSettings, SharingSettings, TemplateConfig, TextSlot, UserProfile } from './types';
@@ -171,15 +171,16 @@ export default function App() {
   const [showWebcam, setShowWebcam] = useState(false);
   const [camReady,   setCamReady]   = useState(false);
 
-  // Show landing when: no saved session AND no specific event slug in URL
+  // Show landing when: no saved session AND (root URL OR the /edit route needs auth)
   const [showLanding, setShowLanding] = useState(
-    !_savedAuth && INITIAL_EVENT_SLUG === 'default'
+    !_savedAuth && (INITIAL_EVENT_SLUG === 'default' || IS_EDIT_ROUTE)
   );
 
   // ── Multi-event state ─────────────────────────────────────────────────────
   const [eventSlug, setEventSlug] = useState(INITIAL_EVENT_SLUG);
+  // A signed-in admin landing on /edit opens straight into the event editor.
   const [appMode,   setAppMode]   = useState<'app' | 'admin-dashboard' | 'event-editor'>(
-    _savedAuth ? 'admin-dashboard' : 'app'
+    _savedAuth ? (IS_EDIT_ROUTE ? 'event-editor' : 'admin-dashboard') : 'app'
   );
   const [eventsList, setEventsList] = useState<EventMeta[]>([]);
   // Current event's identity + window (name/dates), loaded from bootstrap. Drives the
@@ -191,6 +192,44 @@ export default function App() {
 
   // Keep eventSlug in profile in sync with eventSlug state
   useEffect(() => { setProfile(prev => ({ ...prev, eventSlug })); }, [eventSlug]);
+
+  // ── Client-side routing ────────────────────────────────────────────────────
+  // The editor lives at /edit (e.g. /edit?event=slug); the dashboard at / and the
+  // live/attendee view at /?event=slug. We sync the URL on navigation and mirror
+  // browser back/forward so the address bar and the view never drift apart.
+  const authedRef = useRef(isAdminAuthenticated);
+  useEffect(() => { authedRef.current = isAdminAuthenticated; }, [isAdminAuthenticated]);
+
+  function setPath(path: string, replace = false) {
+    try {
+      if (replace) window.history.replaceState({}, '', path);
+      else window.history.pushState({}, '', path);
+    } catch { /* history may be unavailable in some embeds */ }
+  }
+
+  useEffect(() => {
+    function onPop() {
+      const isEdit = /\/edit\/?$/.test(window.location.pathname);
+      const slug   = new URLSearchParams(window.location.search).get('event') || 'default';
+      setEventSlug(slug);
+      if (!authedRef.current) return;                 // attendees stay in the app view
+      if (isEdit)                 setAppMode('event-editor');
+      else if (slug !== 'default'){ setAppMode('app'); setIsAdminOpen(false); }
+      else                         setAppMode('admin-dashboard');
+    }
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  // Populate the events list for signed-in admins (powers the editor's event
+  // switcher, which is reachable directly via /edit without visiting the dashboard).
+  useEffect(() => {
+    if (!isAdminAuthenticated) return;
+    callGetEventsList(
+      (r) => { if (Array.isArray(r.events)) setEventsList(r.events); },
+      () => { /* best-effort — switcher just shows the current event */ },
+    );
+  }, [isAdminAuthenticated]);
 
   // Attach webcam stream to video element once modal opens
   useEffect(() => {
@@ -345,6 +384,7 @@ export default function App() {
     setShowAdminLogin(false);
     setShowLanding(false);
     setAppMode('admin-dashboard');
+    setPath('/', true);   // land on the dashboard even if arriving via /edit unauthenticated
   }
 
   function handleLogout() {
@@ -356,6 +396,7 @@ export default function App() {
     setIsAdminOpen(false);
     setAppMode('app');
     setShowLanding(true);
+    setPath('/', true);
   }
 
   // Entitlement helpers. Pro unlocks everything; Free hits hard limits server-side too.
@@ -549,6 +590,7 @@ export default function App() {
         toast.success('Event deleted.');
         setIsAdminOpen(false);
         setAppMode('admin-dashboard');
+        setPath('/');
       },
       (err) => { setIsDeletingEvent(false); toast.error(`Delete failed: ${(err as Error)?.message ?? err}`); }
     );
@@ -709,6 +751,7 @@ export default function App() {
             setAppMode('event-editor');
             setEditStats(null);
             setConfirmDeleteEvent(false);
+            setPath('/edit?event=' + encodeURIComponent(slug));
           }}
           onClose={() => setAppMode('app')}
           onLogout={handleLogout}
@@ -749,9 +792,9 @@ export default function App() {
           editStats={editStats}
           editStatsLoading={editStatsLoading}
           isDeletingEvent={isDeletingEvent}
-          onSwitchEvent={(slug) => { setEventSlug(slug); setEditStats(null); setConfirmDeleteEvent(false); }}
-          onBackToDashboard={() => setAppMode('admin-dashboard')}
-          onOpenLiveEvent={() => { setIsAdminOpen(false); setAppMode('app'); }}
+          onSwitchEvent={(slug) => { setEventSlug(slug); setEditStats(null); setConfirmDeleteEvent(false); setPath('/edit?event=' + encodeURIComponent(slug), true); }}
+          onBackToDashboard={() => { setAppMode('admin-dashboard'); setPath('/'); }}
+          onOpenLiveEvent={() => { setIsAdminOpen(false); setAppMode('app'); setPath('/?event=' + encodeURIComponent(eventSlug)); }}
           onUpgrade={() => setShowUpgrade(true)}
           onTemplateLoad={handleTemplateLoad}
           onSelectTemplate={handleSelectTemplate}
