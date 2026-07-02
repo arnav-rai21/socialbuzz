@@ -121,6 +121,10 @@ export interface EventMeta {
   name:      string;
   createdAt: string;
   updatedAt: string;
+  // Event window (datetime-local strings, e.g. "2026-07-03T18:00"). The embeddable
+  // widget only shows inside [startAt, endAt]; it disappears once endAt has passed.
+  startAt?:  string;
+  endAt?:    string;
 }
 
 export interface EventStats {

@@ -19,6 +19,9 @@ export async function ensureTables() {
     )`;
   // Multi-tenancy: every event is owned by the account that created it.
   await sql`ALTER TABLE events_list ADD COLUMN IF NOT EXISTS owner_email TEXT`;
+  // Event window (stored as datetime-local strings; the widget hides after end_at).
+  await sql`ALTER TABLE events_list ADD COLUMN IF NOT EXISTS start_at TEXT`;
+  await sql`ALTER TABLE events_list ADD COLUMN IF NOT EXISTS end_at   TEXT`;
   await sql`
     CREATE TABLE IF NOT EXISTS events_config (
       slug                 TEXT PRIMARY KEY,

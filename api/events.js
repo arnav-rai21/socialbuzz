@@ -8,10 +8,10 @@ const DEFAULT_SLOT = { x: 880, y: 640, width: 520, height: 520, radius: 32 };
 async function getEventsList(ownerEmail) {
   if (!ownerEmail) return { events: [] };
   const { rows } = await sql`
-    SELECT slug, name, created_at, updated_at FROM events_list
+    SELECT slug, name, created_at, updated_at, start_at, end_at FROM events_list
     WHERE LOWER(owner_email) = LOWER(${ownerEmail})
     ORDER BY created_at DESC`;
-  return { events: rows.map(r => ({ slug: r.slug, name: r.name, createdAt: r.created_at, updatedAt: r.updated_at })) };
+  return { events: rows.map(r => ({ slug: r.slug, name: r.name, createdAt: r.created_at, updatedAt: r.updated_at, startAt: r.start_at || '', endAt: r.end_at || '' })) };
 }
 
 async function createEvent(slug, name, ownerEmail) {
@@ -40,19 +40,32 @@ async function createEvent(slug, name, ownerEmail) {
   return { success: true, slug, name: String(name) };
 }
 
-async function renameEvent(slug, name, ownerEmail) {
+// Update event details: name and/or the start/end window. Only fields that are
+// provided (not undefined) are changed; pass an empty string to clear a date.
+async function updateEvent(slug, { name, startAt, endAt }, ownerEmail) {
   if (!slug) throw new Error('slug is required');
-  const newName = String(name || '').trim();
-  if (!newName) throw new Error('Event name is required.');
-  if (newName.length > 120) throw new Error('Event name is too long (max 120 characters).');
 
-  const owner = (await sql`SELECT owner_email FROM events_list WHERE slug = ${slug}`).rows[0]?.owner_email || '';
-  if (!isSuperAdmin(ownerEmail) && owner && owner.toLowerCase() !== String(ownerEmail).toLowerCase()) {
-    throw new Error('Not authorized to rename this event.');
+  const { rows } = await sql`SELECT owner_email, name, start_at, end_at FROM events_list WHERE slug = ${slug}`;
+  if (!rows.length) throw new Error('Event not found.');
+  const cur = rows[0];
+  if (!isSuperAdmin(ownerEmail) && cur.owner_email && cur.owner_email.toLowerCase() !== String(ownerEmail).toLowerCase()) {
+    throw new Error('Not authorized to edit this event.');
   }
-  const { rowCount } = await sql`UPDATE events_list SET name = ${newName}, updated_at = NOW() WHERE slug = ${slug}`;
-  if (!rowCount) throw new Error('Event not found.');
-  return { success: true, slug, name: newName };
+
+  let newName = cur.name;
+  if (name !== undefined) {
+    newName = String(name).trim();
+    if (!newName) throw new Error('Event name is required.');
+    if (newName.length > 120) throw new Error('Event name is too long (max 120 characters).');
+  }
+  const newStart = startAt !== undefined ? (String(startAt).trim() || null) : cur.start_at;
+  const newEnd   = endAt   !== undefined ? (String(endAt).trim()   || null) : cur.end_at;
+  if (newStart && newEnd && new Date(newEnd).getTime() < new Date(newStart).getTime()) {
+    throw new Error('End date must be after the start date.');
+  }
+
+  await sql`UPDATE events_list SET name = ${newName}, start_at = ${newStart}, end_at = ${newEnd}, updated_at = NOW() WHERE slug = ${slug}`;
+  return { success: true, slug, name: newName, startAt: newStart || '', endAt: newEnd || '' };
 }
 
 async function deleteEvent(slug, ownerEmail) {
@@ -92,10 +105,10 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      const { action, slug, name, visitorId, adminEmail } = req.body || {};
+      const { action, slug, name, startAt, endAt, visitorId, adminEmail } = req.body || {};
       if (action === 'getEventsList') return res.status(200).json({ success: true, data: await getEventsList(adminEmail) });
       if (action === 'createEvent')   return res.status(200).json({ success: true, data: await createEvent(slug, name, adminEmail) });
-      if (action === 'renameEvent')   return res.status(200).json({ success: true, data: await renameEvent(slug, name, adminEmail) });
+      if (action === 'updateEvent')   return res.status(200).json({ success: true, data: await updateEvent(slug, { name, startAt, endAt }, adminEmail) });
       if (action === 'deleteEvent')   return res.status(200).json({ success: true, data: await deleteEvent(slug, adminEmail) });
       if (action === 'deleteActivity') return res.status(200).json({ success: true, data: await deleteActivity(slug, visitorId) });
       return res.status(400).json({ success: false, error: 'Unknown action' });

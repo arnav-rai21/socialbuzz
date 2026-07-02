@@ -6,12 +6,12 @@ import {
   ChevronDown,
   ChevronLeft,
   Code2,
-  Copy,
   ExternalLink,
   Facebook,
   FileText,
   Image as ImageIcon,
   Instagram,
+  LayoutGrid,
   Link2,
   Linkedin,
   ListChecks,
@@ -51,7 +51,9 @@ import { DEFAULT_PHOTO_TOOLS_SETTINGS, DEFAULT_SHARING_SETTINGS, X_CHAR_LIMIT } 
 
 type Section =
   | 'basic' | 'design' | 'fields' | 'sharing' | 'phototools'
-  | 'analytics' | 'share' | 'settings';
+  | 'analytics' | 'sharelink' | 'widget' | 'settings';
+
+type Group = 'setup' | 'share' | 'settings';
 
 interface EventEditorProps {
   eventSlug:          string;
@@ -60,6 +62,10 @@ interface EventEditorProps {
   plan:               'free' | 'pro';
   isPro:              boolean;
   templatesLoading:   boolean;
+  startAt:            string;   // datetime-local string, or ''
+  endAt:              string;
+  createdAt:          string;   // ISO timestamps for the footer
+  updatedAt:          string;
 
   templates:          TemplateConfig[];
   activeKey:          string;
@@ -99,7 +105,7 @@ interface EventEditorProps {
   onFieldSettingsChange:(s: FieldSettings) => void;
   onPhotoToolsChange:   (s: PhotoToolsSettings) => void;
   onSaveEventSettings:  (onDone?: () => void) => void;
-  onRenameEvent:        (name: string, onDone?: () => void) => void;
+  onUpdateEvent:        (fields: { name?: string; startAt?: string; endAt?: string }, onDone?: () => void) => void;
 
   onLoadStats:      (slug: string) => void;
   onDeleteActivity: (visitorId?: string) => void;
@@ -115,23 +121,38 @@ const SECTION_TITLES: Record<Section, string> = {
   sharing:    'Sharing',
   phototools: 'Photo Tools',
   analytics:  'Analytics & Reporting',
-  share:      'Share & Embed',
-  settings:   'Settings',
+  sharelink:  'Share Link',
+  widget:     'Website Widget',
+  settings:   'Danger Zone',
+};
+
+// Which collapsible group each section lives under ('' = top-level standalone).
+const GROUP_OF: Record<Section, Group | ''> = {
+  basic: 'setup', design: 'setup', fields: 'setup', sharing: 'setup', phototools: 'setup',
+  analytics: '', sharelink: 'share', widget: 'share', settings: 'settings',
 };
 
 // Sections whose "Save changes" persists something.
-const SAVEABLE: Section[] = ['design', 'fields', 'sharing', 'phototools'];
+const SAVEABLE: Section[] = ['basic', 'design', 'fields', 'sharing', 'phototools'];
 
 const noop = () => {};
 
 const joinCap = (cap: string, tags: string) =>
   [cap.trim(), tags.trim()].filter(Boolean).join('\n\n');
 
+// Short date for the Basic Details footer (from an ISO timestamp).
+const fmtDate = (iso: string): string => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function EventEditor(props: EventEditorProps) {
   const {
     eventSlug, eventName, eventsList, plan, isPro, templatesLoading,
+    startAt, endAt, createdAt, updatedAt,
     templates, activeKey, activeTemplate, activeFont, profile, userCroppedDataUrl,
     isMappingMode, isTextMappingMode, isSaving,
     sharingSettings, fieldSettings, photoToolsSettings,
@@ -140,23 +161,24 @@ export default function EventEditor(props: EventEditorProps) {
     onTemplateLoad, onSelectTemplate, onDeleteTemplate, onSlotChange, onClearPhotoSlot,
     onTextSlotChange, onToggleMapping, onToggleTextMapping, onFontChange, onSaveTemplate,
     onSharingChange, onFieldSettingsChange, onPhotoToolsChange, onSaveEventSettings,
-    onRenameEvent, onLoadStats, onDeleteActivity, onDeleteEvent,
+    onUpdateEvent, onLoadStats, onDeleteActivity, onDeleteEvent,
   } = props;
 
-  const [section, setSection]       = useState<Section>('design');
+  const [section, setSection]       = useState<Section>('basic');
   const [eventMenuOpen, setEventMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Collapsible sidebar groups — the group holding the active section starts open.
+  const [openGroups, setOpenGroups] = useState<Record<Group, boolean>>({ setup: true, share: false, settings: false });
 
-  // Basic Details: editable event name.
-  const [nameDraft, setNameDraft] = useState(eventName);
-  const [renaming,  setRenaming]  = useState(false);
-  useEffect(() => { setNameDraft(eventName); }, [eventName]);
-  const nameChanged = nameDraft.trim().length > 0 && nameDraft.trim() !== eventName;
-  function saveName() {
-    if (!nameChanged || renaming) return;
-    setRenaming(true);
-    onRenameEvent(nameDraft.trim(), () => setRenaming(false));
-  }
+  // Basic Details: editable name + event window. Drafts re-seed when the
+  // event (or its loaded meta) changes; the top-bar "Save changes" persists them.
+  const [nameDraft,  setNameDraft]  = useState(eventName);
+  const [startDraft, setStartDraft] = useState(startAt);
+  const [endDraft,   setEndDraft]   = useState(endAt);
+  useEffect(() => {
+    setNameDraft(eventName); setStartDraft(startAt); setEndDraft(endAt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventSlug, eventName, startAt, endAt]);
 
   // Embed widget config (Share & Embed section)
   const [embedPosition, setEmbedPosition] = useState<'right' | 'left'>('right');
@@ -185,40 +207,86 @@ export default function EventEditor(props: EventEditorProps) {
   }
 
   function handleSaveChanges() {
+    if (section === 'basic') {
+      if (!nameDraft.trim()) { toast.error('Event name is required.'); return; }
+      if (startDraft && endDraft && new Date(endDraft).getTime() < new Date(startDraft).getTime()) {
+        toast.error('End date must be after the start date.'); return;
+      }
+      onUpdateEvent({ name: nameDraft.trim(), startAt: startDraft, endAt: endDraft });
+      return;
+    }
     if (section === 'design' && activeTemplate.templateDataUrl) onSaveTemplate();
     else onSaveEventSettings();
   }
 
-  function selectSection(key: Section, locked: boolean) {
+  function selectSection(key: Section, locked = false) {
     if (locked) { onUpgrade(); return; }
+    const g = GROUP_OF[key];
+    if (g) setOpenGroups(prev => ({ ...prev, [g]: true }));   // reveal the active item's group
     setSection(key);
   }
 
-  // ── Sidebar item ──────────────────────────────────────────────────────────
+  function toggleGroup(g: Group) {
+    setOpenGroups(prev => ({ ...prev, [g]: !prev[g] }));
+  }
 
-  const NavItem = ({ id, label, Icon, locked = false, indent = false }: {
-    id: Section; label: string; Icon: any; locked?: boolean; indent?: boolean;
+  // ── Sidebar pieces ──────────────────────────────────────────────────────────
+
+  // A collapsible group header (Event Setup / Share & Embed / Settings).
+  const GroupHeader = ({ group, label, Icon, danger = false }: {
+    group: Group; label: string; Icon: any; danger?: boolean;
+  }) => (
+    <button
+      onClick={() => toggleGroup(group)}
+      className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[15px] font-black cursor-pointer transition-colors hover:bg-slate-50 text-slate-800"
+    >
+      <Icon size={17} className={danger ? 'text-red-500' : 'text-violet-500'} />
+      <span className="flex-1 text-left">{label}</span>
+      <ChevronDown size={15} className={['text-slate-400 transition-transform', openGroups[group] ? '' : '-rotate-90'].join(' ')} />
+    </button>
+  );
+
+  // An indented child item inside a group.
+  const SubItem = ({ id, label, Icon, danger = false, locked = false }: {
+    id: Section; label: string; Icon: any; danger?: boolean; locked?: boolean;
   }) => {
     const active = section === id;
     return (
       <button
         onClick={() => selectSection(id, locked)}
         className={[
-          'w-full flex items-center gap-2.5 rounded-xl text-sm font-semibold transition-colors cursor-pointer',
-          indent ? 'pl-3 pr-3 py-2' : 'px-3 py-2.5',
-          active ? 'bg-violet-50 text-violet-700' : 'text-slate-600 hover:bg-slate-100',
+          'w-full flex items-center gap-2.5 pl-9 pr-3 py-2 rounded-xl text-sm font-semibold transition-colors cursor-pointer',
+          active
+            ? (danger ? 'bg-red-50 text-red-600' : 'bg-violet-50 text-violet-700')
+            : (danger ? 'text-red-500 hover:bg-red-50/60' : 'text-slate-600 hover:bg-slate-100'),
         ].join(' ')}
       >
-        <Icon size={16} className={active ? 'text-violet-600' : 'text-slate-400'} />
+        <Icon size={15} className={active ? (danger ? 'text-red-600' : 'text-violet-600') : (danger ? 'text-red-500' : 'text-slate-400')} />
         <span className="flex-1 text-left truncate">{label}</span>
         {locked && <Lock size={12} className="text-slate-300" />}
       </button>
     );
   };
 
-  const GroupLabel = ({ children }: { children: string }) => (
-    <p className="px-3 pt-4 pb-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400">{children}</p>
-  );
+  // A standalone top-level item (Analytics & Reporting) — no children.
+  const TopItem = ({ id, label, Icon, locked = false }: {
+    id: Section; label: string; Icon: any; locked?: boolean;
+  }) => {
+    const active = section === id;
+    return (
+      <button
+        onClick={() => selectSection(id, locked)}
+        className={[
+          'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[15px] font-black cursor-pointer transition-colors',
+          active ? 'bg-violet-50 text-violet-700 ring-1 ring-violet-200' : 'text-slate-800 hover:bg-slate-50',
+        ].join(' ')}
+      >
+        <Icon size={17} className={active ? 'text-violet-600' : 'text-violet-500'} />
+        <span className="flex-1 text-left">{label}</span>
+        {locked && <Lock size={13} className="text-slate-300" />}
+      </button>
+    );
+  };
 
   return (
     <div className="flex h-[100dvh] w-full bg-slate-50 overflow-hidden">
@@ -235,22 +303,38 @@ export default function EventEditor(props: EventEditorProps) {
           </button>
         </div>
 
-        <nav className="flex-1 px-2 pb-4">
-          <GroupLabel>Event Setup</GroupLabel>
-          <NavItem id="basic"      label="Basic Details"        Icon={FileText}  indent />
-          <NavItem id="design"     label="Templates & Design"   Icon={ImageIcon} indent />
-          <NavItem id="fields"     label="Form Fields"          Icon={ListChecks} indent />
-          <NavItem id="sharing"    label="Sharing"              Icon={Share2}    indent />
-          <NavItem id="phototools" label="Photo Tools"          Icon={Wand2}     indent />
+        <nav className="flex-1 px-2 py-2 flex flex-col gap-0.5">
+          {/* Event Setup */}
+          <GroupHeader group="setup" label="Event Setup" Icon={LayoutGrid} />
+          {openGroups.setup && (
+            <div className="flex flex-col gap-0.5">
+              <SubItem id="basic"      label="Basic Details"      Icon={FileText}   />
+              <SubItem id="design"     label="Templates & Design" Icon={ImageIcon}  />
+              <SubItem id="fields"     label="Form Fields"        Icon={ListChecks} />
+              <SubItem id="sharing"    label="Sharing"            Icon={Share2}     />
+              <SubItem id="phototools" label="Photo Tools"        Icon={Wand2}      />
+            </div>
+          )}
 
-          <GroupLabel>Analytics &amp; Reporting</GroupLabel>
-          <NavItem id="analytics"  label="Analytics"            Icon={BarChart2} locked={!isPro} indent />
+          {/* Analytics & Reporting (standalone) */}
+          <TopItem id="analytics" label="Analytics & Reporting" Icon={BarChart2} locked={!isPro} />
 
-          <GroupLabel>Share &amp; Embed</GroupLabel>
-          <NavItem id="share"      label="Share & Embed"        Icon={Link2}     indent />
+          {/* Share & Embed */}
+          <GroupHeader group="share" label="Share & Embed" Icon={Link2} />
+          {openGroups.share && (
+            <div className="flex flex-col gap-0.5">
+              <SubItem id="sharelink" label="Share Link"     Icon={Link2}  />
+              <SubItem id="widget"    label="Website Widget" Icon={Code2}  />
+            </div>
+          )}
 
-          <GroupLabel>Settings</GroupLabel>
-          <NavItem id="settings"   label="Settings"             Icon={SettingsIcon} indent />
+          {/* Settings */}
+          <GroupHeader group="settings" label="Settings" Icon={SettingsIcon} />
+          {openGroups.settings && (
+            <div className="flex flex-col gap-0.5">
+              <SubItem id="settings" label="Danger Zone" Icon={Trash2} danger />
+            </div>
+          )}
         </nav>
       </aside>
 
@@ -336,48 +420,78 @@ export default function EventEditor(props: EventEditorProps) {
 
               {/* ── Basic Details ── */}
               {section === 'basic' && (
-                <div className="max-w-2xl flex flex-col gap-5">
-                  <SectionCard title="Event details" desc="Identity and public link for this event.">
-                    <Field label="Event name">
-                      <div className="flex items-center gap-2 flex-wrap">
+                <div className="max-w-4xl">
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-7 flex flex-col gap-6">
+
+                    {/* Row 1: Name + Slug */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-sm font-bold text-slate-700">Event Name <span className="text-red-500">*</span></label>
                         <input
                           type="text"
                           value={nameDraft}
                           maxLength={120}
                           onChange={(e) => setNameDraft(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') saveName(); }}
-                          className="flex-1 min-w-[220px] px-3 py-2.5 rounded-xl border-[1.5px] border-slate-200 bg-white text-slate-900 text-sm font-semibold outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/10 transition-all"
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleSaveChanges(); }}
+                          placeholder="e.g. ETBrand World Summit"
+                          className="w-full px-3.5 py-3 rounded-xl border-[1.5px] border-slate-200 bg-white text-slate-900 text-[15px] font-semibold outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/10 transition-all"
                         />
-                        <button
-                          onClick={saveName}
-                          disabled={!nameChanged || renaming}
-                          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-violet-600 text-white text-sm font-bold cursor-pointer hover:bg-violet-700 transition-colors active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {renaming ? <Loader size={14} className="animate-spin" /> : <Save size={14} />} Save name
-                        </button>
                       </div>
-                    </Field>
-                    <Field label="Slug">
-                      <code className="text-sm font-mono text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 inline-block">{eventSlug}</code>
-                    </Field>
-                    <Field label="Plan">
-                      <span className={['inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full',
-                        isPro ? 'bg-violet-50 text-violet-700 border border-violet-100' : 'bg-slate-100 text-slate-500'].join(' ')}>
-                        {isPro ? <><Sparkles size={12} /> Pro</> : 'Free'}
-                      </span>
-                    </Field>
-                    <Field label="Public event link">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <code className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 truncate max-w-full">{eventUrl}</code>
-                        <button onClick={() => copy(eventUrl, 'Link copied!')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-bold cursor-pointer hover:bg-violet-700 transition-colors active:scale-95">
-                          <Copy size={13} /> Copy
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-sm font-bold text-slate-700">Slug <span className="font-normal text-slate-400">(fixed — URL key)</span></label>
+                        <input
+                          type="text"
+                          value={eventSlug}
+                          readOnly
+                          title="The slug is fixed — it's part of the event's URL."
+                          className="w-full px-3.5 py-3 rounded-xl border-[1.5px] border-slate-200 bg-slate-50 text-slate-500 text-[15px] font-mono outline-none cursor-not-allowed"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Row 2: Start + End */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-sm font-bold text-slate-700">Start Date &amp; Time</label>
+                        <input
+                          type="datetime-local"
+                          value={startDraft}
+                          onChange={(e) => setStartDraft(e.target.value)}
+                          className="w-full px-3.5 py-3 rounded-xl border-[1.5px] border-slate-200 bg-white text-slate-900 text-[15px] font-medium outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/10 transition-all"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-sm font-bold text-slate-700">End Date &amp; Time <span className="font-normal text-slate-400">(widget hides after this)</span></label>
+                        <input
+                          type="datetime-local"
+                          value={endDraft}
+                          min={startDraft || undefined}
+                          onChange={(e) => setEndDraft(e.target.value)}
+                          className="w-full px-3.5 py-3 rounded-xl border-[1.5px] border-slate-200 bg-white text-slate-900 text-[15px] font-medium outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/10 transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Live link */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-sm font-bold text-slate-700">Live event link</label>
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <code className="flex-1 min-w-[240px] text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 truncate">{eventUrl}</code>
+                        <button onClick={() => copy(eventUrl, 'Link copied!')} className="flex items-center gap-1.5 px-4 py-3 rounded-xl bg-violet-600 text-white text-sm font-bold cursor-pointer hover:bg-violet-700 transition-colors active:scale-95">
+                          <Link2 size={15} /> Copy
                         </button>
-                        <a href={eventUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 text-xs font-bold cursor-pointer hover:bg-slate-50 transition-colors active:scale-95">
-                          <ExternalLink size={13} /> Open
+                        <a href={eventUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-4 py-3 rounded-xl border border-slate-200 text-slate-700 text-sm font-bold cursor-pointer hover:bg-slate-50 transition-colors active:scale-95">
+                          <ExternalLink size={15} /> Open
                         </a>
                       </div>
-                    </Field>
-                  </SectionCard>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="flex items-center gap-6 flex-wrap pt-4 border-t border-slate-100 text-xs text-slate-400 font-medium">
+                      {createdAt && <span>Created {fmtDate(createdAt)}</span>}
+                      {updatedAt && <span>Last updated {fmtDate(updatedAt)}</span>}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -503,10 +617,10 @@ export default function EventEditor(props: EventEditorProps) {
                 </div>
               )}
 
-              {/* ── Share & Embed ── */}
-              {section === 'share' && (
-                <div className="max-w-2xl flex flex-col gap-5">
-                  <SectionCard title="Share link" desc="Share this link with attendees, or open the live event page.">
+              {/* ── Share Link ── */}
+              {section === 'sharelink' && (
+                <div className="max-w-2xl">
+                  <SectionCard title="Share & Open" desc="Share this link with attendees, or open the live event page.">
                     <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
                       <code className="text-xs text-slate-600 truncate flex-1">{eventUrl}</code>
                     </div>
@@ -519,7 +633,12 @@ export default function EventEditor(props: EventEditorProps) {
                       </a>
                     </div>
                   </SectionCard>
+                </div>
+              )}
 
+              {/* ── Website Widget ── */}
+              {section === 'widget' && (
+                <div className="max-w-2xl">
                   <SectionCard title="Website Widget" desc="Floating button + popup panel. Paste before </body> on any page.">
                     {!isPro ? (
                       <div className="flex flex-col items-start gap-3 py-4">
@@ -626,15 +745,6 @@ function SectionCard({ title, desc, children }: { title: string; desc?: string; 
         <h3 className="text-base font-black text-slate-900">{title}</h3>
         {desc && <p className="text-sm text-slate-500 mt-1">{desc}</p>}
       </div>
-      {children}
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{label}</p>
       {children}
     </div>
   );

@@ -91,6 +91,24 @@ export default async function handler(req, res) {
     const eventSlug = req.query.event || 'default';
     const mode      = req.query.mode  || '';
 
+    // Current event's identity + window (drives the widget's show/hide + the editor).
+    const evRows = (await sql`SELECT name, start_at, end_at, created_at, updated_at FROM events_list WHERE slug = ${eventSlug}`).rows;
+    const ev = evRows[0] || {};
+    const event = {
+      slug:      eventSlug,
+      name:      ev.name || '',
+      startAt:   ev.start_at || '',
+      endAt:     ev.end_at   || '',
+      createdAt: ev.created_at ? String(ev.created_at) : '',
+      updatedAt: ev.updated_at ? String(ev.updated_at) : '',
+    };
+
+    // Lightweight mode: the embeddable widget only needs the event window to decide
+    // whether to render its button — skip the (heavy) template image inlining.
+    if (req.query.meta === '1') {
+      return res.status(200).json({ success: true, data: { eventSlug, event, startAt: event.startAt, endAt: event.endAt } });
+    }
+
     const { templates, sharingSettings, fieldSettings, photoToolsSettings } = await loadEventData(eventSlug);
     const defaultTemplate = templates.find(t => t.isDefault) || templates[0] || EMPTY_TEMPLATE;
     const LINKEDIN_REDIRECT = process.env.LINKEDIN_REDIRECT_URI || `${APP_BASE_URL}/api/linkedin-callback`;
@@ -106,6 +124,9 @@ export default async function handler(req, res) {
       adminEmail:          ADMIN_EMAIL,
       isAuthorized:        true,
       eventSlug,
+      event,                          // { slug, name, startAt, endAt, createdAt, updatedAt }
+      startAt:             event.startAt,
+      endAt:               event.endAt,
       mode,
       templateConfig,                 // default/first template (widget + back-compat)
       templates,                      // all enabled templates for the event

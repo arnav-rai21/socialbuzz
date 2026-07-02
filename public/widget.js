@@ -192,6 +192,8 @@
   btn.setAttribute('aria-label', 'Open social panel');
   btn.setAttribute('aria-expanded', 'false');
   btn.innerHTML = FAB_ICON_HTML;
+  /* Hidden until we confirm the event is within its start/end window (gate at end). */
+  btn.style.display = 'none';
   document.body.appendChild(btn);
 
   /* ── Panel ───────────────────────────────────────────────────── */
@@ -365,4 +367,28 @@
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') { if (isHelpOpen) closeHelp(); else if (isOpen) closePanel(); }
   });
+
+  /* ── Event window gate ───────────────────────────────────────── */
+  /* The widget only appears inside the event's [start, end] window and
+     disappears once the end date/time has passed (and stays hidden before it
+     starts). Fails open on any error so a network hiccup never hides a live one. */
+  function _ts(v) { if (!v) return NaN; var t = new Date(v).getTime(); return isNaN(t) ? NaN : t; }
+  function _isActive(meta) {
+    var now = Date.now();
+    var s = _ts(meta && meta.startAt), e = _ts(meta && meta.endAt);
+    if (!isNaN(s) && now < s) return false;   // not started yet
+    if (!isNaN(e) && now > e) return false;   // ended
+    return true;
+  }
+  function _revealWidget() { btn.style.display = 'flex'; }
+  function _removeWidget() {
+    try { if (btn.parentNode)   btn.parentNode.removeChild(btn); }     catch (_) {}
+    try { if (panel.parentNode) panel.parentNode.removeChild(panel); } catch (_) {}
+  }
+  try {
+    fetch(baseUrl + '/api/bootstrap?event=' + encodeURIComponent(slug) + '&meta=1', { credentials: 'omit' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { _isActive((j && j.data) || {}) ? _revealWidget() : _removeWidget(); })
+      .catch(function () { _revealWidget(); });
+  } catch (_) { _revealWidget(); }
 })();

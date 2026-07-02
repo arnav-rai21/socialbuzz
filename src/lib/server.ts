@@ -128,7 +128,7 @@ const ACTION_ROUTES: Record<string, string> = {
   identifyVisitor:       '/api/log-share',
   getEventsList:         '/api/events',
   createEvent:           '/api/events',
-  renameEvent:           '/api/events',
+  updateEvent:           '/api/events',
   deleteEvent:           '/api/events',
   deleteActivity:        '/api/events',
   getEventStats:         '/api/stats',
@@ -185,6 +185,9 @@ export async function loadBootstrapAsync(eventSlug: string): Promise<{
   sharingSettings?:    SharingSettings | null;
   fieldSettings?:      import('../types').FieldSettings | null;
   photoToolsSettings?: PhotoToolsSettings | null;
+  event?:              { slug: string; name: string; startAt: string; endAt: string; createdAt: string; updatedAt: string };
+  startAt?:            string;
+  endAt?:              string;
   adminEmail:          string;
   eventsList?:         import('../types').EventMeta[];
   linkedInRedirectUri?: string;
@@ -357,15 +360,17 @@ export function callCreateEvent(
     .catch(onFailure);
 }
 
-// ── Rename event ───────────────────────────────────────────────────────────────
+// ── Update event (name + start/end window) ───────────────────────────────────────
 
-export function callRenameEvent(
+export interface UpdateEventResult { success: boolean; slug: string; name: string; startAt: string; endAt: string }
+
+export function callUpdateEvent(
   slug:      string,
-  name:      string,
-  onSuccess: (result: { success: boolean; slug: string; name: string }) => void,
+  fields:    { name?: string; startAt?: string; endAt?: string },
+  onSuccess: (result: UpdateEventResult) => void,
   onFailure: (err: Error | string) => void
 ): void {
-  callApi<{ success: boolean; slug: string; name: string }>({ action: 'renameEvent', slug, name, adminEmail: getAdminEmail() })
+  callApi<UpdateEventResult>({ action: 'updateEvent', slug, ...fields, adminEmail: getAdminEmail() })
     .then(onSuccess)
     .catch(onFailure);
 }

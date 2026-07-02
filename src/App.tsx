@@ -36,7 +36,7 @@ import ShareButtons from './components/ShareButtons';
 import TemplateGallery from './components/TemplateGallery';
 import UserForm from './components/UserForm';
 
-import { GOOGLE_CLIENT_ID, IS_GAS, IS_GAS_ADMIN, INITIAL_EVENT_SLUG, INITIAL_MODE, DEFAULT_SLOT, buildWidgetSnippet, callDeleteActivity, callDeleteEvent, callDeleteTemplate, callGetEventStats, callIdentifyVisitor, callLogOpen, callRenameEvent, callSaveEventSettings, callSaveTemplate, callUploadImage, clearVisitorIdentity, getVisitorIdentity, setVisitorIdentity, loadBootstrap, loadBootstrapAsync } from './lib/server';
+import { GOOGLE_CLIENT_ID, IS_GAS, IS_GAS_ADMIN, INITIAL_EVENT_SLUG, INITIAL_MODE, DEFAULT_SLOT, buildWidgetSnippet, callDeleteActivity, callDeleteEvent, callDeleteTemplate, callGetEventStats, callIdentifyVisitor, callLogOpen, callSaveEventSettings, callSaveTemplate, callUpdateEvent, callUploadImage, clearVisitorIdentity, getVisitorIdentity, setVisitorIdentity, loadBootstrap, loadBootstrapAsync } from './lib/server';
 import type { VisitorIdentity } from './lib/server';
 import { promptOneTap, disableOneTapAutoSelect } from './lib/googleOneTap';
 import type { EventMeta, EventStats, FieldSettings, FontSettings, GeneratedAsset, ImageSlot, PhotoToolsSettings, SharingSettings, TemplateConfig, TextSlot, UserProfile } from './types';
@@ -52,6 +52,14 @@ const keyOf = (t: TemplateConfig): string => (t.id != null ? String(t.id) : 'new
 // Up-to-2-char initials for the visitor avatar fallback (no Google photo).
 const initialsOf = (s: string): string =>
   ((s || '').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()) || '?';
+
+// Human-friendly event date+time (from a datetime-local string) for the closed-event notice.
+const formatEventDate = (s?: string): string => {
+  if (!s) return '';
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+  return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
 
 // Placeholder upgrade modal — self-serve billing is not wired yet, so this
 // explains Pro and points to a contact link. Shown on any Pro-gated action.
@@ -174,6 +182,10 @@ export default function App() {
     _savedAuth ? 'admin-dashboard' : 'app'
   );
   const [eventsList, setEventsList] = useState<EventMeta[]>([]);
+  // Current event's identity + window (name/dates), loaded from bootstrap. Drives the
+  // editor's Basic Details and the attendee "event ended / not started" gate.
+  const [eventMeta, setEventMeta] = useState<{ name?: string; startAt?: string; endAt?: string; createdAt?: string; updatedAt?: string }>({});
+  const [isSavingEvent, setIsSavingEvent] = useState(false);
 
   const [profile, setProfile] = useState<UserProfile>({ name: '', title: '', company: '', email: '', eventSlug });
 
@@ -214,6 +226,7 @@ export default function App() {
 
       if (data.eventPlan) setEventPlan(data.eventPlan);
       if (Array.isArray(data.eventsList)) setEventsList(data.eventsList);
+      if (data.event) setEventMeta(data.event);
     }).finally(() => setTemplatesLoading(false));
     // Re-fetch whenever the event being edited/viewed changes (e.g. switching
     // events from the admin dashboard), otherwise the template list stays stale.
@@ -300,6 +313,15 @@ export default function App() {
   });
   const canGenerate   = hasTemplate && hasUserPhoto && detailsFilled;
   const isAdminActive = isAdminOpen && isAdminAuthenticated;
+
+  // Event window gate: real attendees can't use a closed event (before it starts or
+  // after it ends). Admins are never gated so they can always preview/configure.
+  const nowMs      = Date.now();
+  const endMs      = eventMeta.endAt   ? new Date(eventMeta.endAt).getTime()   : NaN;
+  const startMs    = eventMeta.startAt ? new Date(eventMeta.startAt).getTime() : NaN;
+  const eventEnded      = !Number.isNaN(endMs)   && nowMs > endMs;
+  const eventNotStarted = !Number.isNaN(startMs) && nowMs < startMs;
+  const eventClosed = (eventEnded || eventNotStarted) && !isAdminAuthenticated;
 
   // Canvas column visible on mobile only when mapping mode is active
   const showCanvasOnMobile = (isMappingMode || isTextMappingMode) && isAdminActive;
@@ -459,14 +481,20 @@ export default function App() {
     );
   }
 
-  // Rename the current event. Updates the shared events list so the new name
-  // shows everywhere (top bar, switcher, dashboard). onDone always fires so the
-  // caller can clear its saving state on success or failure.
-  function handleRenameEvent(name: string, onDone?: () => void) {
-    callRenameEvent(
-      eventSlug, name,
-      (r) => { setEventsList(prev => prev.map(e => e.slug === r.slug ? { ...e, name: r.name } : e)); toast.success('Event renamed.'); onDone?.(); },
-      (err) => { toast.error(`Rename failed: ${(err as Error)?.message ?? err}`); onDone?.(); },
+  // Update the current event's details (name + start/end window). Syncs the shared
+  // events list and the event-window state used by the attendee gate.
+  function handleUpdateEvent(fields: { name?: string; startAt?: string; endAt?: string }, onDone?: () => void) {
+    setIsSavingEvent(true);
+    callUpdateEvent(
+      eventSlug, fields,
+      (r) => {
+        setEventMeta(prev => ({ ...prev, name: r.name, startAt: r.startAt, endAt: r.endAt, updatedAt: new Date().toISOString() }));
+        setEventsList(prev => prev.map(e => e.slug === r.slug ? { ...e, name: r.name, startAt: r.startAt, endAt: r.endAt } : e));
+        setIsSavingEvent(false);
+        toast.success('Event details saved!');
+        onDone?.();
+      },
+      (err) => { setIsSavingEvent(false); toast.error(`Save failed: ${(err as Error)?.message ?? err}`); onDone?.(); },
     );
   }
 
@@ -692,7 +720,7 @@ export default function App() {
 
   // Full-screen backend editor — sidebar workspace for configuring one event.
   if (appMode === 'event-editor' && isAdminAuthenticated) {
-    const eventName = eventsList.find(e => e.slug === eventSlug)?.name || eventSlug;
+    const eventName = eventMeta.name || eventsList.find(e => e.slug === eventSlug)?.name || eventSlug;
     return (
       <>
         <EventEditor
@@ -702,6 +730,10 @@ export default function App() {
           plan={adminPlan}
           isPro={isPro}
           templatesLoading={templatesLoading}
+          startAt={eventMeta.startAt || ''}
+          endAt={eventMeta.endAt || ''}
+          createdAt={eventMeta.createdAt || ''}
+          updatedAt={eventMeta.updatedAt || ''}
           templates={templates}
           activeKey={activeKey}
           activeTemplate={activeTemplate}
@@ -710,7 +742,7 @@ export default function App() {
           userCroppedDataUrl={userCroppedDataUrl}
           isMappingMode={isMappingMode}
           isTextMappingMode={isTextMappingMode}
-          isSaving={isSavingTemplate || isSavingSettings}
+          isSaving={isSavingTemplate || isSavingSettings || isSavingEvent}
           sharingSettings={sharingSettings}
           fieldSettings={fieldSettings}
           photoToolsSettings={photoToolsSettings}
@@ -735,7 +767,7 @@ export default function App() {
           onFieldSettingsChange={setFieldSettings}
           onPhotoToolsChange={setPhotoToolsSettings}
           onSaveEventSettings={handleSaveEventSettings}
-          onRenameEvent={handleRenameEvent}
+          onUpdateEvent={handleUpdateEvent}
           onLoadStats={loadEditStats}
           onDeleteActivity={(visitorId) => callDeleteActivity(
             eventSlug, visitorId,
@@ -1011,6 +1043,23 @@ export default function App() {
         <div>
           <p className="text-base font-black text-slate-800">Loading your event…</p>
           <p className="text-sm text-slate-400 mt-1">Setting up templates and details.</p>
+        </div>
+      </div>
+      ) : eventClosed ? (
+      /* Event window gate — before start or after end, attendees can't post. */
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 py-24 text-center">
+        <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center">
+          <Lock size={26} className="text-slate-400" />
+        </div>
+        <div className="max-w-sm">
+          <h2 className="text-xl font-black text-slate-800">
+            {eventEnded ? 'This event has ended' : 'This event hasn’t started yet'}
+          </h2>
+          <p className="text-sm text-slate-500 mt-2 leading-relaxed">
+            {eventEnded
+              ? `${eventMeta.name || 'The event'} wrapped up on ${formatEventDate(eventMeta.endAt)}. Post creation is now closed.`
+              : `${eventMeta.name || 'The event'} opens on ${formatEventDate(eventMeta.startAt)}. Check back then to create your post.`}
+          </p>
         </div>
       </div>
       ) : (
@@ -1324,7 +1373,7 @@ export default function App() {
       )}{/* end two-column layout / section panels */}
 
       {/* Bottom CTA — only shown on form view (mobile only; desktop has button in right column) */}
-      {currentView === 'form' && !templatesLoading && !(isAdminActive && editorSection !== 'template') && (
+      {currentView === 'form' && !templatesLoading && !eventClosed && !(isAdminActive && editorSection !== 'template') && (
         <div className="lg:hidden sticky bottom-0 z-10 bg-white border-t border-slate-100 px-4 py-3 sm:px-5" style={{ paddingBottom: 'calc(0.75rem + var(--safe-bottom))' }}>
           <button
             onClick={() => handleGenerate()}
