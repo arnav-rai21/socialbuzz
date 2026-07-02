@@ -859,12 +859,12 @@ function SharingSection({ ss, onChange, template }: { ss: SharingSettings; onCha
     : joinCap(caption, hashtags);
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <div className="max-w-5xl mx-auto">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-7">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="flex flex-col lg:flex-row gap-8">
 
           {/* Left — editor */}
-          <div className="min-w-0 flex flex-col gap-4">
+          <div className="flex-1 min-w-0 flex flex-col gap-4">
             <p className="text-xs font-black uppercase tracking-widest text-slate-500">Default Caption &amp; Hashtags</p>
 
             <div>
@@ -920,23 +920,21 @@ function SharingSection({ ss, onChange, template }: { ss: SharingSettings; onCha
             </div>
           </div>
 
-          {/* Right — live preview */}
-          <div className="min-w-0">
-            <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
-              <p className="text-xs font-black uppercase tracking-widest text-slate-500">Post Preview</p>
-              <div className="flex flex-wrap gap-1.5">
-                {PREVIEW_PLATFORMS.map(p => {
-                  const active = platform === p.key;
-                  return (
-                    <button key={p.key} onClick={() => setPlatform(p.key)}
-                      style={active ? { background: p.color, borderColor: p.color } : undefined}
-                      className={['flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition-colors',
-                        active ? 'text-white' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'].join(' ')}>
-                      <p.Icon size={13} /> {p.label}
-                    </button>
-                  );
-                })}
-              </div>
+          {/* Right — live preview (fixed narrow column so it reads like a real feed card) */}
+          <div className="w-full lg:w-[380px] flex-shrink-0">
+            <p className="text-xs font-black uppercase tracking-widest text-slate-500 mb-3">Post Preview</p>
+            <div className="flex flex-wrap gap-1.5 mb-4">
+              {PREVIEW_PLATFORMS.map(p => {
+                const active = platform === p.key;
+                return (
+                  <button key={p.key} onClick={() => setPlatform(p.key)}
+                    style={active ? { background: p.color, borderColor: p.color } : undefined}
+                    className={['flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition-colors',
+                      active ? 'text-white' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'].join(' ')}>
+                    <p.Icon size={13} /> {p.label}
+                  </button>
+                );
+              })}
             </div>
             <PostPreview platform={platform} text={previewText} template={template} />
           </div>
